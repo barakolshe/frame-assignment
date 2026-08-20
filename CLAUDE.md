@@ -10,7 +10,7 @@ circular dependencies must resolve to `-1` rather than hang.
 - **Spec (authoritative):** `Hometask Backend/excersice.txt`. Sample inputs: `Hometask Backend/1.json`, `2.json`, `3.json`.
 - **Implementation plan (authoritative):** `PLAN.md` (mirrored at `docs/superpowers/plans/2026-08-20-lumon-innie-scheduler.md`). Do not rewrite it without being asked; follow it task by task.
 - **Layout:** the `lumon/` package at the repo root, tests in `tests/`.
-- **Hard constraint:** stdlib only at runtime — `lumon/` must have zero third-party imports, and `[project].dependencies` stays empty. `lumon/interp.py` must never import `threading`.
+- **Hard constraint:** pydantic v2 is the *only* runtime dependency — `lumon/` imports pydantic and the stdlib, nothing else, and `[project].dependencies` stays at exactly `["pydantic>=2.7"]`. `lumon/interp/` must never import `threading`.
 
 ## Rules
 
@@ -33,7 +33,7 @@ circular dependencies must resolve to `-1` rather than hang.
 
 ## Tools
 
-- **uv** — the project and dependency manager. Run everything through it: `uv run pytest`, `uv run ruff check .`, `uv run mypy lumon tests`, `uv add --dev <pkg>`. Never `pip install` into the environment by hand, and never add a runtime dependency (see the stdlib-only constraint above).
+- **uv** — the project and dependency manager. Run everything through it: `uv run pytest`, `uv run ruff check .`, `uv run mypy lumon tests`, `uv add --dev <pkg>`. Never `pip install` into the environment by hand, and never add a runtime dependency beyond pydantic (see the hard constraint above).
 - **ruff** — linter and import sorter, configured in `pyproject.toml` (line length 100; `E`, `F`, `I`, `B`, `UP`, `SIM`). Autofix with `uv run ruff check --fix .`.
 - **mypy** — type checker in `strict` mode, configured in `pyproject.toml`. New code is expected to be fully annotated.
 - **pytest** — the test suite, in `tests/`.
