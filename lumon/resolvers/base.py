@@ -1,9 +1,9 @@
 """The seam between the interpreter and the outside world.
 
 Two implementations exist: `ConcurrentResolver` and `SerialResolver`. They
-differ in *how long they wait*, never in *what they return* -- that is the S8
-invariant, and the determinism test is what enforces it. In SOLID terms, that
-test IS the Liskov check for this hierarchy.
+differ in *how long they wait*, never in *what they return*. That invariant --
+waiting may vary, answers may not -- is what the determinism test enforces. In
+SOLID terms, that test IS the Liskov check for this hierarchy.
 
 **Why the seam is wider than `resolve(innie_id) -> int`.** A one-at-a-time
 signature cannot express short-circuit: it forces the interpreter to block on

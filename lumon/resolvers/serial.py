@@ -1,15 +1,31 @@
 """Resolver backed by a recursive evaluator: recurses on demand, never waits.
 
-The other half of the Liskov pair. `ConcurrentResolver` blocks a thread until
-a Cell settles; this one evaluates the Innie it needs, right there on the
-stack. Different waiting, identical answers -- that is S8, and the determinism
-check (Task 16) is what enforces it.
+**What this is for.** Not a faster path, and not a fallback for when threads
+are inconvenient: it is the instrument used to check that the *threaded*
+runner is right. Both resolvers drive the same interpreter and must return the
+same values for the same schedule -- the only thing they may differ on is how
+long they wait. So running a schedule through both and diffing the
+registries turns "the results are deterministic" into something a test can
+actually fail on. `tests/test_cli.py::test_serial_mode_agrees_with_concurrent`
+does that on the samples today; a generated corpus is what extends it beyond
+the schedules a human thought to write.
+
+**Why one implementation cannot check itself.** Running the threaded runner 50
+times and getting the same number proves the answer is *repeatable*, not that
+it is *correct* -- a wrong answer is perfectly repeatable when the OS
+interleaves threads the same way every run, which on one machine it usually
+does. An implementation with no threads at all cannot share that bug, so a
+disagreement between the two is proof that scheduling leaked into a result,
+and it names the schedule and the Innie it leaked into.
+
+`ConcurrentResolver` blocks a thread until a Cell settles; this one evaluates
+the Innie it needs, right there on the stack. Same answers, different waiting.
 
 The one non-obvious behaviour lives in `_quantified` and it is load-bearing:
 **a branch that would re-enter an Innie already under evaluation is deferred,
-not resolved** (S8b). Try every branch that can stand on its own first; only
-if none of them yields an absorbing result do the deferred ones get resolved,
-which is when they settle to -1 (S9). The concurrent resolver gets this
+not resolved**. Try every branch that can stand on its own first; only if
+none of them yields an absorbing result do the deferred ones get resolved,
+which is when they settle to -1. The concurrent resolver gets this
 ordering for free -- a cyclic branch cannot settle until the detector fires,
 so a non-cyclic branch always settles first -- and without it this oracle
 publishes -1 where the concurrent run completes normally.
@@ -21,6 +37,7 @@ from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from lumon.cell import Result, unwrap
+from lumon.errors import DependencyFaulted, LumonError, NoWorkProduct
 from lumon.resolvers.base import Resolver
 
 
@@ -36,11 +53,11 @@ class Evaluator(Protocol):
     def result_for(self, innie_id: str) -> Result:
         """Evaluate this Innie if it has not been evaluated yet, and return
         its settled Result. A cycle back to an Innie under evaluation settles
-        that cycle to -1 rather than recursing forever (S9)."""
+        that cycle to -1 rather than recursing forever."""
 
     def probe(self, innie_id: str) -> Result | None:
         """`result_for`, but `None` if the branch would re-enter an Innie
-        already under evaluation -- i.e. "this one is deferrable" (S8b).
+        already under evaluation -- i.e. "this one is deferrable".
         Nothing is committed on that path, so the branch can be resolved for
         real later."""
 
@@ -63,9 +80,21 @@ class SerialResolver(Resolver):
         return unwrap(self._evaluator.result_for(innie_id))
 
     def values(self, innie_ids: Sequence[str]) -> list[int]:
-        # An AND-wait: no branch can escape, so there is nothing to defer.
-        # Left to right, so the order of `innie_ids` decides which fault wins.
-        return [self.value(innie_id) for innie_id in innie_ids]
+        """An AND-wait: no branch can escape, so there is nothing to defer.
+
+        Resolve every target first, unwrap secondly. That is not the same as
+        unwrapping each in turn, and the difference is a whole class of
+        disagreement with the threaded runner: it blocks until ALL the targets
+        settle, so a target that turns out to be a cycle member is handed its
+        -1 for the deadlock before a faulted sibling is ever unwrapped.
+        Raising at the first fault would stop the walk short of the cycle, and
+        this Innie would fault where the threaded run publishes -1.
+
+        `unwrap` then raises for the earliest failure in the caller's order,
+        which is the fault the threaded runner picks too.
+        """
+        results = [self._evaluator.result_for(innie_id) for innie_id in innie_ids]
+        return [unwrap(result) for result in results]
 
     def any_of(self, innie_ids: Sequence[str], pred: Callable[[int], bool]) -> bool:
         return self._quantified(innie_ids, pred, absorbing=True)
@@ -82,22 +111,42 @@ class SerialResolver(Resolver):
         """The OR-fold and the AND-fold are the same walk with a different
         absorbing value: `True` ends an ANY OF, `False` ends an ALL OF.
 
-        Two passes, for S8(b). Returning early on an absorbing value is always
-        sound -- by definition the skipped branches cannot overturn it.
-        """
-        deferred: list[str] = []
+        Two passes, so that a branch which would re-enter an Innie already
+        under evaluation is tried only after the ones that can stand alone.
+        Returning early on an absorbing value is always sound -- by definition
+        the skipped branches cannot overturn it.
 
-        for innie_id in innie_ids:
+        A faulted branch never absorbs either: an absorbing result outranks a
+        pending fault. Raising the fault where it is found would make the answer
+        depend on the walk order -- `-47 >= ALL OF [VOID, 0]` would fault here
+        and return False in the threaded runner, which reaches the absorbing
+        `0` first. So a fault is remembered and re-raised only if nothing
+        absorbs the fold, earliest in the caller's order: the same rule, and
+        the same choice of fault, as `ConcurrentResolver._quantified`.
+        """
+        deferred: list[tuple[int, str]] = []
+        faults: list[tuple[int, LumonError]] = []
+
+        def absorbs(position: int, result: Result) -> bool:
+            try:
+                value = unwrap(result)
+            except (DependencyFaulted, NoWorkProduct) as fault:
+                faults.append((position, fault))
+                return False
+            return pred(value) is absorbing
+
+        for position, innie_id in enumerate(innie_ids):
             probed = self._evaluator.probe(innie_id)
             if probed is None:
-                deferred.append(innie_id)
-                continue
-            if pred(unwrap(probed)) is absorbing:
+                deferred.append((position, innie_id))
+            elif absorbs(position, probed):
                 return absorbing
 
-        for innie_id in deferred:  # no way forward, so these settle to -1 (S9)
-            if pred(self.value(innie_id)) is absorbing:
+        for position, innie_id in deferred:  # no way forward, so these settle to -1
+            if absorbs(position, self._evaluator.result_for(innie_id)):
                 return absorbing
 
+        if faults:
+            raise min(faults, key=lambda entry: entry[0])[1]
         # Nothing absorbed: ANY OF [] -> False, ALL OF [] -> True.
         return not absorbing

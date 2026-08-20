@@ -5,8 +5,8 @@ Two kinds of wait, and the difference matters to more than speed:
 * `value` / `values` are **AND**-waits -- block until *all* the named Innies
   have settled -- and go through `Registry.await_innies`.
 * `any_of` / `all_of` are **OR**-waits: every branch is awaited at once and the
-  first absorbing value ends the wait (S8, and Requirement 4's "unblock as soon
-  as the result is determined"), via `Registry.await_any`.
+  first absorbing value ends the wait -- Requirement 4's "unblock as soon as the
+  result is determined" -- via `Registry.await_any`.
 
 Both register their edges with the wait-for graph inside the same lock
 acquisition that runs detection. Waiting anywhere else would be a wait the
@@ -44,7 +44,7 @@ class ConcurrentResolver(Resolver):
     def values(self, innie_ids: Sequence[str]) -> list[int]:
         # Resolve the Cells before taking the lock. An id that is not in the
         # Registry is a KeyError naming it -- the loader already rejected
-        # unknown references (S11), so this can only be an internal bug, and
+        # unknown references, so this can only be an internal bug, and
         # it must surface as one rather than as a wait that never ends.
         for innie_id in innie_ids:
             self.registry.cell(innie_id)
@@ -78,14 +78,14 @@ class ConcurrentResolver(Resolver):
         value lands. `absorbing` is True for ANY OF (an OR-fold, where `true`
         wins) and False for ALL OF (an AND-fold, where `false` wins).
 
-        S8, the rule this whole method exists to obey: short-circuiting may
+        The rule this whole method exists to obey: short-circuiting may
         change how long we wait, never what we compute. That holds because an
         absorbing value cannot be overturned by the branches it skips -- so
         the answer is a fold over the branches, not a function of the order
         they happened to settle in.
 
-        Faults follow from the same rule and are the one place the plan's
-        sketch was not deterministic. A fault is not an absorbing value, so it
+        Faults follow from the same rule, and are the easiest place to leak
+        order into the answer. A fault is not an absorbing value, so it
         cannot decide the fold while an absorbing branch exists; raising it the
         instant it arrives would make the answer depend on which branch settled
         first. It is deferred instead, and surfaces only if no branch absorbs
@@ -93,7 +93,7 @@ class ConcurrentResolver(Resolver):
         strictly left-to-right resolver would have raised.
         """
         for innie_id in innie_ids:
-            self.registry.cell(innie_id)  # unknown ids are a bug, not a wait (S11)
+            self.registry.cell(innie_id)  # unknown ids are a bug, not a wait
 
         positions = {innie_id: i for i, innie_id in enumerate(innie_ids)}
         remaining = list(innie_ids)

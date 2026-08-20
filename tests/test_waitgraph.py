@@ -43,7 +43,7 @@ def test_three_node_cycle() -> None:
 
 
 def test_self_reference_is_a_one_node_cycle() -> None:
-    """S9: `ADD A` inside A is a cycle of length 1, not a parse error."""
+    """`ADD A` inside A is a cycle of length 1, not a parse error."""
     assert SccDetector().find_cycle(graph(A="A")) == ["A"]
 
 
@@ -56,7 +56,7 @@ def test_overlapping_cycles_form_one_scc() -> None:
 
 def test_a_node_waiting_on_a_cycle_is_not_a_member() -> None:
     """X is stuck, but it is not *circular*: the cycle publishes -1 and X
-    wakes up and computes with it. Deadlock resolves outward (S9)."""
+    wakes up and computes with it. Deadlock resolves outward."""
     assert SccDetector().find_cycle(graph(A="B", B="A", X="A")) == ["A", "B"]
 
 
