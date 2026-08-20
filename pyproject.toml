@@ -2,7 +2,9 @@
 name = "lumon-scheduler"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "pydantic>=2.7",
+]
 
 [dependency-groups]
 dev = [
