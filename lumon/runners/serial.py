@@ -1,9 +1,22 @@
 """The single-threaded reference oracle -- one Outie doing every Innie's work.
 
-Drives the SAME interpreter as the concurrent path, through the same Resolver
-seam, so the two runners can only disagree if state has leaked outside the
-Registry. That is the whole point of having it: it is the control in Task 16's
-experiment, not a fallback for when threads are inconvenient.
+**Why this exists alongside the threaded runner.** `ConcurrentRunner` is the
+deliverable: the spec asks for Outies working simultaneously. This one is how
+we check that the threaded one is right. It drives the SAME interpreter
+through the SAME Resolver seam, so the two can only disagree if state has
+leaked outside the Registry -- which makes "the results are deterministic" a
+claim a test can fail on rather than one nobody can falsify. See the module
+docstring of `lumon/resolvers/serial.py` for why a single implementation
+cannot check itself.
+
+Only one of the two runs in any given execution: `--mode` picks it, once, up
+front. They never cooperate, and nothing switches between them mid-run. The
+only place both appear is a test that runs the same schedule through each and
+diffs the registries.
+
+It is a control, not a fallback for when threads are inconvenient -- but it
+ships, and `--mode serial` is the debugging path when a number looks wrong:
+one thread, no interleaving, a stack trace that means something.
 
 Lazy, memoized and recursive rather than a topological sort. A static order
 does not exist -- `CONDITIONAL_ADD` only resolves its list when its condition
