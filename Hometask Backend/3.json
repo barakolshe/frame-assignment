@@ -1,0 +1,24 @@
+{
+  "innies": [
+    {
+      "id": "HELLY",
+      "schedule": "LOAD 1\nSHIFT 3 TIMES\nMULTIPLY 2\nWAFFLE\nEND_SHIFT"
+    },
+    {
+      "id": "MARK",
+      "schedule": "LOAD 0\nSHIFT 2 TIMES\nADD HELLY\nEND_SHIFT\nWAFFLE"
+    },
+    {
+      "id": "IRVING",
+      "schedule": "LOAD 100\nWELLNESS_CHECK HELLY > ANY OF [MARK]\nCONDITIONAL_ADD [HELLY, MARK] IF MARK > 10\nWAFFLE"
+    },
+    {
+      "id": "BURT",
+      "schedule": "LOAD 1\nSHIFT 4 TIMES\nADD IRVING\nWAFFLE\nEND_SHIFT"
+    },
+    {
+      "id": "DYLAN",
+      "schedule": "LOAD 0\nADD [HELLY, MARK, IRVING, BURT]\nMULTIPLY 2\nWELLNESS_CHECK BURT > ALL OF [HELLY, MARK, IRVING]\nWAFFLE"
+    }
+  ]
+}

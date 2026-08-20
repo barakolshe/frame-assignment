@@ -1,0 +1,23 @@
+# Forq extension local state (issue board) — not part of the codebase
+.forq/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+
+# Editors / OS
+.DS_Store
+__MACOSX/
+.idea/
+.vscode/*
+!.vscode/settings.json

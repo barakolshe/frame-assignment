@@ -1,0 +1,12 @@
+{
+  "innies": [
+    {
+      "id": "DYLAN",
+      "schedule": "LOAD 1\nWAFFLE\nLOAD 100\nWAFFLE"
+    },
+    {
+      "id": "BURT",
+      "schedule": "LOAD 0\nADD [DYLAN]\nWAFFLE\nADD [DYLAN]\nWAFFLE"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "innies": [
+    {
+      "id": "HELLY",
+      "schedule": "LOAD 10\nSHIFT 2 TIMES\nADD 5\nEND_SHIFT\nWAFFLE"
+    },
+    {
+      "id": "MARK",
+      "schedule": "LOAD 2\nADD 3\nWAFFLE"
+    },
+    {
+      "id": "IRVING",
+      "schedule": "LOAD 0\nADD [HELLY, MARK]\nWAFFLE"
+    },
+    {
+      "id": "BURT",
+      "schedule": "LOAD 100\nWELLNESS_CHECK IRVING > ALL OF [HELLY, MARK]\nWAFFLE"
+    }
+  ]
+}
