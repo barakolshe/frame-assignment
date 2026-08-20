@@ -36,6 +36,7 @@ from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from lumon.cell import Result, unwrap
+from lumon.errors import DependencyFaulted, LumonError, NoWorkProduct
 from lumon.resolvers.base import Resolver
 
 
@@ -78,9 +79,21 @@ class SerialResolver(Resolver):
         return unwrap(self._evaluator.result_for(innie_id))
 
     def values(self, innie_ids: Sequence[str]) -> list[int]:
-        # An AND-wait: no branch can escape, so there is nothing to defer.
-        # Left to right, so the order of `innie_ids` decides which fault wins.
-        return [self.value(innie_id) for innie_id in innie_ids]
+        """An AND-wait: no branch can escape, so there is nothing to defer.
+
+        Resolve every target first, unwrap secondly. That is not the same as
+        unwrapping each in turn, and the difference is a whole class of
+        disagreement with the threaded runner: it blocks until ALL the targets
+        settle, so a target that turns out to be a cycle member is handed its
+        -1 (S9) before a faulted sibling is ever unwrapped (S10). Raising at
+        the first fault instead would stop the walk short of the cycle, and
+        this Innie would fault where the threaded run publishes -1.
+
+        `unwrap` then raises for the earliest failure in the caller's order,
+        which is the fault the threaded runner picks too.
+        """
+        results = [self._evaluator.result_for(innie_id) for innie_id in innie_ids]
+        return [unwrap(result) for result in results]
 
     def any_of(self, innie_ids: Sequence[str], pred: Callable[[int], bool]) -> bool:
         return self._quantified(innie_ids, pred, absorbing=True)
@@ -99,20 +112,38 @@ class SerialResolver(Resolver):
 
         Two passes, for S8(b). Returning early on an absorbing value is always
         sound -- by definition the skipped branches cannot overturn it.
-        """
-        deferred: list[str] = []
 
-        for innie_id in innie_ids:
+        A faulted branch never absorbs (S8a: an absorbing result wins over a
+        pending fault). Raising it where it is found would make the answer
+        depend on the walk order -- `-47 >= ALL OF [VOID, 0]` would fault here
+        and return False in the threaded runner, which reaches the absorbing
+        `0` first. So a fault is remembered and re-raised only if nothing
+        absorbs the fold, earliest in the caller's order: the same rule, and
+        the same choice of fault, as `ConcurrentResolver._quantified`.
+        """
+        deferred: list[tuple[int, str]] = []
+        faults: list[tuple[int, LumonError]] = []
+
+        def absorbs(position: int, result: Result) -> bool:
+            try:
+                value = unwrap(result)
+            except (DependencyFaulted, NoWorkProduct) as fault:
+                faults.append((position, fault))
+                return False
+            return pred(value) is absorbing
+
+        for position, innie_id in enumerate(innie_ids):
             probed = self._evaluator.probe(innie_id)
             if probed is None:
-                deferred.append(innie_id)
-                continue
-            if pred(unwrap(probed)) is absorbing:
+                deferred.append((position, innie_id))
+            elif absorbs(position, probed):
                 return absorbing
 
-        for innie_id in deferred:  # no way forward, so these settle to -1 (S9)
-            if pred(self.value(innie_id)) is absorbing:
+        for position, innie_id in deferred:  # no way forward: these settle to -1 (S9)
+            if absorbs(position, self._evaluator.result_for(innie_id)):
                 return absorbing
 
+        if faults:
+            raise min(faults, key=lambda entry: entry[0])[1]
         # Nothing absorbed: ANY OF [] -> False, ALL OF [] -> True.
         return not absorbing
