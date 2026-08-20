@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 
 from lumon.cell import Registry
+from lumon.errors import Cancelled
 from lumon.interp import execute
 from lumon.loader import Innie
 from lumon.resolvers.concurrent import ConcurrentResolver
@@ -19,13 +20,27 @@ def run_innie(innie: Innie, registry: Registry) -> None:
     every path out, because an unsettled Cell hangs every dependent for the
     rest of the run and no watchdog exists yet to notice. Success, VOID, and
     fault are the only three exits.
+
+    Deadlock adds a fourth, and it is the exception to the rule above: a
+    cancelled Innie's Cell was already settled to -1 by the thread that
+    detected the cycle (S9), so this one must return WITHOUT settling. Doing
+    otherwise trips `DoubleSettle` -- which stays a hard error, because
+    everywhere else a second settle really is a bug.
     """
     cell = registry.cell(innie.id)
     resolver = ConcurrentResolver(registry, innie.id)
     try:
         outcome = execute(innie.program, resolver)
+    except Cancelled:
+        return  # a cycle member: the detecting thread already published -1
     except BaseException as error:  # deliberate catch-all -- see the docstring
-        cell.fault(error)  # S10: the fault becomes this Innie's work product
+        if not registry.is_cancelled(innie.id):
+            cell.fault(error)  # S10: the fault becomes this Innie's work product
+        return
+    if registry.is_cancelled(innie.id):
+        # Belt and braces: cancellation is only ever observed while blocked,
+        # so this cannot fire today. It documents the invariant and costs a
+        # dict lookup.
         return
     if outcome.staged is None:
         cell.commit_void()  # S2: a workday with no WAFFLE publishes VOID

@@ -1,8 +1,9 @@
 """Resolver backed by a live Registry: waits on the Cells' shared Condition.
 
 Every wait here is an AND-wait -- block until *all* the named Innies have
-settled. That is exactly right for `ADD [A, B]`, and it is the whole of this
-task.
+settled -- and it goes through `Registry.await_innies`, which registers the
+wait edges and runs deadlock detection in the same lock acquisition. Waiting
+anywhere else would be a wait the detector cannot see.
 
 `any_of` / `all_of` are OR-folds, so an absorbing value could end the wait
 early (S8) and Requirement 4 asks for exactly that. Task 13 makes them do it.
@@ -15,7 +16,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 
-from lumon.cell import Cell, Registry, Result, unwrap
+from lumon.cell import Registry, unwrap
+from lumon.errors import Cancelled
 from lumon.resolvers.base import Resolver
 
 
@@ -25,11 +27,9 @@ class ConcurrentResolver(Resolver):
     A plain class, not a model: it holds a reference to shared lock state and
     is only ever constructed by the runner.
 
-    `me` is the asking Innie. It is unused here and is still part of the
-    resolver's identity from the start -- Task 12 needs a name to hang
-    wait-for edges and cancellation on, and retrofitting identity onto a
-    resolver that never had it is the kind of change that touches every call
-    site.
+    `me` is the asking Innie -- the name the wait-for edges and cancellation
+    hang on. Cancellation surfaces as `Cancelled` raised *through* these
+    methods, so the interpreter never learns that threads exist (ISP).
     """
 
     def __init__(self, registry: Registry, me: str) -> None:
@@ -44,12 +44,16 @@ class ConcurrentResolver(Resolver):
         # Registry is a KeyError naming it -- the loader already rejected
         # unknown references (S11), so this can only be an internal bug, and
         # it must surface as one rather than as a wait that never ends.
-        cells = [self.registry.cell(innie_id) for innie_id in innie_ids]
+        for innie_id in innie_ids:
+            self.registry.cell(innie_id)
+
+        self.registry.await_innies(self.me, set(innie_ids))
+        if self.registry.is_cancelled(self.me):
+            # This Innie is a cycle member; its Cell already holds -1.
+            raise Cancelled(self.me)
 
         with self.registry.cond:
-            while not all(cell.is_settled_locked() for cell in cells):
-                self.registry.cond.wait()
-            results = [_settled_locked(cell) for cell in cells]
+            results = [self.registry.result_locked(innie_id) for innie_id in innie_ids]
 
         # unwrap only ever raises, and raising while holding the Condition that
         # every other Outie blocks on is a hazard worth not having. The order
@@ -64,11 +68,3 @@ class ConcurrentResolver(Resolver):
     def all_of(self, innie_ids: Sequence[str], pred: Callable[[int], bool]) -> bool:
         # `all` stops at the first false. `ALL OF []` -> True.
         return all(pred(self.value(innie_id)) for innie_id in innie_ids)
-
-
-def _settled_locked(cell: Cell) -> Result:
-    """Caller holds the shared Condition and has already waited for `cell`."""
-    result = cell.peek_locked()
-    if result is None:
-        raise AssertionError(f"{cell.id} unsettled after a completed wait")
-    return result

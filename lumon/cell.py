@@ -20,7 +20,10 @@ from collections.abc import Iterable
 
 from pydantic import BaseModel, ConfigDict
 
+from lumon.deadlock.base import DeadlockDetector
+from lumon.deadlock.scc import SccDetector
 from lumon.errors import DependencyFaulted, DoubleSettle, NoWorkProduct
+from lumon.waitgraph import WaitGraph
 
 # What every Innie on a circular dependency publishes (S9). An ordinary value:
 # a dependent reads -1 and computes with it. Deadlock is not a fault.
@@ -147,17 +150,26 @@ class Registry:
     """One Cell per Innie, pre-populated at construction (S11) so an unknown
     reference is a KeyError, never a hang.
 
-    Single responsibility: own the Cells and the Condition they share. It does
-    not know what a cycle is -- that lives in the wait-for graph and the
-    detectors.
+    Single responsibility: own the Cells and the Condition they share, and be
+    the one place where blocking happens. It does not know what a cycle *is* --
+    that is the wait-for graph's data and the detector's algorithm, both of
+    which it merely holds the lock for.
+
+    `detector` is the DIP seam: swapping the algorithm is a constructor
+    argument, never an edit to this file. It defaults rather than being
+    required because every caller -- the runners, the tests -- constructs a
+    Registry to run a schedule, not to choose an algorithm.
     """
 
-    def __init__(self, innie_ids: Iterable[str]):
+    def __init__(self, innie_ids: Iterable[str], detector: DeadlockDetector | None = None):
         self.cond = threading.Condition()
         self._order: list[str] = list(innie_ids)
         self._cells: dict[str, Cell] = {
             innie_id: Cell(innie_id, self.cond) for innie_id in self._order
         }
+        self._graph = WaitGraph()
+        self._cancelled: set[str] = set()
+        self._detector: DeadlockDetector = detector or SccDetector()
 
     def cell(self, innie_id: str) -> Cell:
         try:
@@ -169,6 +181,88 @@ class Registry:
         """Innie ids in construction order -- a copy, so a caller cannot
         reorder the registry by accident."""
         return list(self._order)
+
+    # -- blocking protocol ------------------------------------------------
+
+    def await_innies(self, me: str, targets: set[str]) -> None:
+        """Block until every target has settled, detecting cycles first.
+
+        Every point where an Innie blocks on *all* of a set of Innies comes
+        through here: ADD/MULTIPLY/MODULO over a list, a bare Ref,
+        CONDITIONAL_ADD's targets, and an unquantified condition's operands.
+
+        The critical property: registering the wait edges and running detection
+        happen inside a SINGLE lock acquisition. Split them and two threads can
+        each register, each see a graph missing the other's edge, and both
+        conclude there is no cycle. Because all Cells share this Condition and
+        `wait()` releases it atomically, registration -> detection -> blocking
+        is one uninterrupted critical section.
+
+        Returning does not mean the targets settled: a cancelled Innie returns
+        early, and the caller is expected to ask `is_cancelled` before reading
+        anything.
+        """
+        with self.cond:
+            pending = self.pending_locked(targets)
+            if not pending:
+                return
+
+            self._graph.wait_on(me, pending)
+            try:
+                self._detect_locked()
+                while not self.all_settled_locked(targets):
+                    if me in self._cancelled:
+                        return
+                    self.cond.wait()
+            finally:
+                self._graph.clear(me)
+
+    def is_cancelled(self, innie_id: str) -> bool:
+        """True once this Innie has been resolved as a cycle member. Its Cell
+        already holds -1, so its thread must stop without settling again."""
+        with self.cond:
+            return innie_id in self._cancelled
+
+    def result_locked(self, innie_id: str) -> Result:
+        """The settled Result of an Innie already waited for. Caller holds
+        self.cond."""
+        result = self._cells[innie_id].peek_locked()
+        if result is None:
+            raise AssertionError(f"{innie_id} unsettled after a completed wait")
+        return result
+
+    # -- detection --------------------------------------------------------
+
+    def _detect_locked(self) -> None:
+        """Run the detector and resolve whatever it finds. Caller holds
+        self.cond.
+
+        Called at every point an Innie registers a wait edge, which is exactly
+        when a cycle can complete: whoever adds the final edge sees the whole
+        cycle and resolves it.
+        """
+        cycle = self._detector.find_cycle(self._graph)
+        if cycle:
+            self._resolve_cycle(cycle)
+
+    def _resolve_cycle(self, members: list[str]) -> None:
+        """Commit -1 to every cycle member (S9). Caller holds self.cond.
+
+        This is the one place a Cell is written by a thread other than its
+        own -- the members are asleep. They learn about it on waking, via
+        `is_cancelled`, and return without settling a second time. The
+        already-settled guard is not paranoia: a member may have been resolved
+        by an overlapping cycle a moment earlier.
+        """
+        for innie_id in members:
+            self._cancelled.add(innie_id)
+            self._graph.clear(innie_id)
+            cell = self._cells[innie_id]
+            if not cell.is_settled_locked():
+                cell._settle_locked(
+                    Result(innie_id=innie_id, value=DEADLOCK_VALUE, error=None)
+                )
+        self.cond.notify_all()
 
     def all_settled_locked(self, innie_ids: Iterable[str]) -> bool:
         """Caller holds self.cond."""
