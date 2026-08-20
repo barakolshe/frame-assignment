@@ -23,6 +23,27 @@ does not exist -- `CONDITIONAL_ADD` only resolves its list when its condition
 holds (S6), so the dependency graph is discovered as it is walked. Recursion
 gives cycle detection for free: an Innie already on the evaluation stack is a
 cycle, by definition.
+
+**Known limitation: cycle membership.** "For free" is not "for nothing". On a
+cyclic schedule this evaluator disagrees with `ConcurrentRunner` on roughly
+10% of the fuzz corpus, always about *who is on the cycle*, and the threaded
+runner is the one that matches S9. Two causes, both structural:
+
+* It settles the cycle its recursion walked into -- the frames between the
+  re-entered Innie and the current one -- where the threaded runner settles
+  the strongly connected component of the wait-for graph. Given
+  `I3: ADD I9` / `I7: LOAD 23, ADD I3` / `I9: ADD [I3, I7, I1]`, I7 is on a
+  cycle (I9 waits on it) and gets -1 there; here the walk reaches I7 only
+  after I3 and I9 have already settled, so it publishes 22.
+* A member goes on executing after being resolved to -1, so it registers
+  waits the threaded run never sees -- there, a resolved member's thread is
+  cancelled the moment it wakes. Those extra waits can pull an uninvolved
+  Innie into the cycle.
+
+Fixing it means replacing the stack-segment rule with SCC membership and
+unwinding a member's frames when its cycle resolves. Until then, trust
+`--mode concurrent` on cyclic schedules, and see the module docstring of
+`tests/test_determinism.py` for what the corpus does and does not assert.
 """
 
 from __future__ import annotations
