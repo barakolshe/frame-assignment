@@ -1,9 +1,24 @@
 """Resolver backed by a recursive evaluator: recurses on demand, never waits.
 
-The other half of the Liskov pair. `ConcurrentResolver` blocks a thread until
-a Cell settles; this one evaluates the Innie it needs, right there on the
-stack. Different waiting, identical answers -- that is S8, and the determinism
-check (Task 16) is what enforces it.
+**What this is for.** Not a faster path, and not a fallback for when threads
+are inconvenient: it is the instrument used to check that the *threaded*
+runner is right. Both resolvers drive the same interpreter and must return the
+same values for the same schedule -- the only thing they may differ on is how
+long they wait (S8). So running a schedule through both and diffing the
+registries turns "the results are deterministic" into something a test can
+actually fail on. `tests/test_cli.py::test_serial_mode_agrees_with_concurrent`
+does that on the samples today; Task 16 does it across a fuzz corpus.
+
+**Why one implementation cannot check itself.** Running the threaded runner 50
+times and getting the same number proves the answer is *repeatable*, not that
+it is *correct* -- a wrong answer is perfectly repeatable when the OS
+interleaves threads the same way every run, which on one machine it usually
+does. An implementation with no threads at all cannot share that bug, so a
+disagreement between the two is proof that scheduling leaked into a result,
+and it names the schedule and the Innie it leaked into.
+
+`ConcurrentResolver` blocks a thread until a Cell settles; this one evaluates
+the Innie it needs, right there on the stack. Same answers, different waiting.
 
 The one non-obvious behaviour lives in `_quantified` and it is load-bearing:
 **a branch that would re-enter an Innie already under evaluation is deferred,
