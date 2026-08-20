@@ -4,10 +4,11 @@
 are inconvenient: it is the instrument used to check that the *threaded*
 runner is right. Both resolvers drive the same interpreter and must return the
 same values for the same schedule -- the only thing they may differ on is how
-long they wait (S8). So running a schedule through both and diffing the
+long they wait. So running a schedule through both and diffing the
 registries turns "the results are deterministic" into something a test can
 actually fail on. `tests/test_cli.py::test_serial_mode_agrees_with_concurrent`
-does that on the samples today; Task 16 does it across a fuzz corpus.
+does that on the samples today; a generated corpus is what extends it beyond
+the schedules a human thought to write.
 
 **Why one implementation cannot check itself.** Running the threaded runner 50
 times and getting the same number proves the answer is *repeatable*, not that
@@ -22,9 +23,9 @@ the Innie it needs, right there on the stack. Same answers, different waiting.
 
 The one non-obvious behaviour lives in `_quantified` and it is load-bearing:
 **a branch that would re-enter an Innie already under evaluation is deferred,
-not resolved** (S8b). Try every branch that can stand on its own first; only
-if none of them yields an absorbing result do the deferred ones get resolved,
-which is when they settle to -1 (S9). The concurrent resolver gets this
+not resolved**. Try every branch that can stand on its own first; only if
+none of them yields an absorbing result do the deferred ones get resolved,
+which is when they settle to -1. The concurrent resolver gets this
 ordering for free -- a cyclic branch cannot settle until the detector fires,
 so a non-cyclic branch always settles first -- and without it this oracle
 publishes -1 where the concurrent run completes normally.
@@ -52,11 +53,11 @@ class Evaluator(Protocol):
     def result_for(self, innie_id: str) -> Result:
         """Evaluate this Innie if it has not been evaluated yet, and return
         its settled Result. A cycle back to an Innie under evaluation settles
-        that cycle to -1 rather than recursing forever (S9)."""
+        that cycle to -1 rather than recursing forever."""
 
     def probe(self, innie_id: str) -> Result | None:
         """`result_for`, but `None` if the branch would re-enter an Innie
-        already under evaluation -- i.e. "this one is deferrable" (S8b).
+        already under evaluation -- i.e. "this one is deferrable".
         Nothing is committed on that path, so the branch can be resolved for
         real later."""
 
@@ -85,8 +86,8 @@ class SerialResolver(Resolver):
         unwrapping each in turn, and the difference is a whole class of
         disagreement with the threaded runner: it blocks until ALL the targets
         settle, so a target that turns out to be a cycle member is handed its
-        -1 (S9) before a faulted sibling is ever unwrapped (S10). Raising at
-        the first fault instead would stop the walk short of the cycle, and
+        -1 for the deadlock before a faulted sibling is ever unwrapped.
+        Raising at the first fault would stop the walk short of the cycle, and
         this Innie would fault where the threaded run publishes -1.
 
         `unwrap` then raises for the earliest failure in the caller's order,
@@ -110,11 +111,13 @@ class SerialResolver(Resolver):
         """The OR-fold and the AND-fold are the same walk with a different
         absorbing value: `True` ends an ANY OF, `False` ends an ALL OF.
 
-        Two passes, for S8(b). Returning early on an absorbing value is always
-        sound -- by definition the skipped branches cannot overturn it.
+        Two passes, so that a branch which would re-enter an Innie already
+        under evaluation is tried only after the ones that can stand alone.
+        Returning early on an absorbing value is always sound -- by definition
+        the skipped branches cannot overturn it.
 
-        A faulted branch never absorbs (S8a: an absorbing result wins over a
-        pending fault). Raising it where it is found would make the answer
+        A faulted branch never absorbs either: an absorbing result outranks a
+        pending fault. Raising the fault where it is found would make the answer
         depend on the walk order -- `-47 >= ALL OF [VOID, 0]` would fault here
         and return False in the threaded runner, which reaches the absorbing
         `0` first. So a fault is remembered and re-raised only if nothing
@@ -139,7 +142,7 @@ class SerialResolver(Resolver):
             elif absorbs(position, probed):
                 return absorbing
 
-        for position, innie_id in deferred:  # no way forward: these settle to -1 (S9)
+        for position, innie_id in deferred:  # no way forward, so these settle to -1
             if absorbs(position, self._evaluator.result_for(innie_id)):
                 return absorbing
 

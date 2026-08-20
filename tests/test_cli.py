@@ -42,7 +42,8 @@ def test_runs_a_sample_and_prints_json(capsys: pytest.CaptureFixture[str]) -> No
 def test_serial_mode_agrees_with_concurrent(
     capsys: pytest.CaptureFixture[str], name: str
 ) -> None:
-    # S8, at the outermost seam: different waiting, identical output.
+    # The determinism invariant at the outermost seam: the two runners wait
+    # very differently and must still print identical output.
     _, concurrent = run(capsys, str(SAMPLES / name))
     _, serial = run(capsys, str(SAMPLES / name), "--mode", "serial")
     assert concurrent == serial
@@ -83,7 +84,7 @@ def test_faulted_innie_reports_error_and_exits_nonzero(
 def test_a_faults_cause_chain_is_reported(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # S10: "BURT failed because DYLAN failed because MODULO by zero".
+    # "BURT failed because DYLAN failed because MODULO by zero".
     path = tmp_path / "chain.json"
     path.write_text(
         json.dumps(
@@ -105,7 +106,7 @@ def test_a_faults_cause_chain_is_reported(
 def test_deadlocked_innies_report_minus_one_and_exit_zero(
     tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # S9/S10: a cycle is a value, not a fault. Nothing failed, so exit 0.
+    # A cycle is a value, not a fault. Nothing failed, so exit 0.
     path = tmp_path / "cycle.json"
     path.write_text(
         json.dumps({"innies": [{"id": "A", "schedule": "LOAD 5\nADD A\nWAFFLE"}]})

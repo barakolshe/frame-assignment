@@ -2,7 +2,7 @@
 
 This is the test the whole design exists to make possible. `ConcurrentRunner`
 is the deliverable and `SerialRunner` is the control; they share an
-interpreter and differ only in how they wait (S8). So a disagreement is never
+interpreter and differ only in how long they wait. So a disagreement is never
 "the threaded one is flaky" -- it is proof that something outside the Registry
 influenced a result, and it names the schedule and the Innie.
 
@@ -19,7 +19,7 @@ modes disagree on roughly 10% of seeds, and the disagreement is the oracle's:
 it settles the cycle its recursion walked into rather than the whole strongly
 connected component, and it lets a member go on executing after resolving it
 to -1, where the threaded runner cancels that member's thread. The threaded
-runner -- the deliverable -- is the one that matches S9, and it is
+runner -- the deliverable -- is the one that is right, and it is
 self-consistent on every seed in the corpus, which is what
 `test_a_cyclic_schedule_settles_the_same_way_every_run` pins. Making the
 oracle agree means rewriting its cycle detection; that is filed as its own
@@ -100,8 +100,8 @@ def test_a_dag_settles_identically_in_both_modes(seed: int) -> None:
 @pytest.mark.parametrize("seed", range(200))
 def test_faults_propagate_identically_in_both_modes(seed: int) -> None:
     """`MODULO 0` and Innies that never WAFFLE, so the corpus covers fault
-    propagation (S10) and the S8(a) rule that an absorbing branch beats a
-    faulted one inside a quantifier."""
+    propagation and the rule that an absorbing branch beats a faulted one
+    inside a quantifier."""
     assert_modes_agree(seed, n=DAG_SIZE, allow_cycles=False, allow_faults=True)
 
 

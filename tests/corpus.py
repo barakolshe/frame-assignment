@@ -9,7 +9,8 @@ References only ever point at Innies defined *earlier*, so the base corpus is
 a DAG and every result is well-defined by construction. `allow_cycles` then
 injects back-edges, which is where the interesting cases live: a cycle's
 membership is where a demand-driven walk and a quiescent wait-for graph could
-each reach a different -- but individually plausible -- answer (S9).
+each reach a different -- but individually plausible -- answer about who is
+on the cycle.
 
 Every knob is explicit at the call site. A corpus whose shape is decided by a
 default is a corpus nobody can tell you the contents of.
@@ -27,10 +28,10 @@ def generate(seed: int, *, n: int, allow_cycles: bool, allow_faults: bool) -> di
     """One random work schedule, in the loader's input shape.
 
     * `allow_cycles` -- append a back-edge to a later Innie (or to itself,
-      which S9 makes a legal cycle of length 1) with probability 0.15.
+      a legal cycle of length 1) with probability 0.15.
     * `allow_faults` -- let `MODULO 0` and Innies that never WAFFLE appear, so
-      the corpus also covers fault propagation (S10) and an absorbing branch
-      beating a faulted one inside a quantifier (S8a).
+      the corpus also covers fault propagation and an absorbing branch
+      beating a faulted one inside a quantifier.
 
     Deterministic in `seed`: same arguments, same schedule, always.
     """
@@ -48,7 +49,7 @@ def generate(seed: int, *, n: int, allow_cycles: bool, allow_faults: bool) -> di
             # Self or later: the back-edge that turns the DAG into a graph.
             lines.append(f"ADD {rng.choice(ids[index:])}")
 
-        # S2: an Innie with no WAFFLE publishes VOID, and its readers fault.
+        # An Innie with no WAFFLE publishes VOID, and its readers fault.
         if not (allow_faults and rng.random() < 0.05):
             lines.append("WAFFLE")
 
@@ -68,7 +69,7 @@ def _body_line(rng: random.Random, earlier: list[str], *, allow_faults: bool) ->
     if choice < 0.30 or not earlier:
         operand = rng.randint(1, 20)
         if allow_faults and rng.random() < 0.04:
-            operand = 0  # MODULO 0 faults (S4); ADD 0 / MULTIPLY 0 do not
+            operand = 0  # MODULO 0 faults; ADD 0 / MULTIPLY 0 do not
         return [f"{rng.choice(_ARITHMETIC)} {operand}"]
 
     if choice < 0.50:

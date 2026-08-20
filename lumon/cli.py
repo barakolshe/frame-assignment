@@ -22,12 +22,13 @@ DEFAULT_MODE = "concurrent"
 
 
 def format_results(registry: Registry) -> dict[str, list[dict[str, object]]]:
-    """The output contract: one entry per Innie, in input order (S11).
+    """The output contract: one entry per Innie, in input order.
 
     `result` is the published integer, or `null` for the two ways an Innie can
-    fail to have one -- VOID (S2) and a fault (S10). Only a fault also carries
-    `error`, which is what distinguishes them. A deadlocked Innie is neither:
-    it published the integer -1 (S9), and reports as an ordinary value.
+    fail to have one -- finishing without a WAFFLE (VOID), and faulting. Only
+    a fault also carries `error`, which is what distinguishes them. A
+    deadlocked Innie is neither: it published the integer -1, and reports as
+    an ordinary value.
     """
     innies: list[dict[str, object]] = []
     for result in registry.snapshot():
@@ -42,7 +43,7 @@ def format_results(registry: Registry) -> dict[str, list[dict[str, object]]]:
 
 def _describe(error: BaseException) -> str:
     """Follow the `__cause__` chain, so a propagated fault reads
-    'dependency DYLAN faulted because line 2: MODULO by zero' (S10).
+    'dependency DYLAN faulted because line 2: MODULO by zero'.
 
     The `seen` set is not paranoia: `raise ... from` accepts a cycle, and a
     cycle here would be an infinite loop in the error path -- the worst place

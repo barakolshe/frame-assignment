@@ -20,14 +20,15 @@ one thread, no interleaving, a stack trace that means something.
 
 Lazy, memoized and recursive rather than a topological sort. A static order
 does not exist -- `CONDITIONAL_ADD` only resolves its list when its condition
-holds (S6), so the dependency graph is discovered as it is walked. Recursion
+holds, so the dependency graph is discovered as it is walked. Recursion
 gives cycle detection for free: an Innie already on the evaluation stack is a
 cycle, by definition.
 
 **Known limitation: cycle membership.** "For free" is not "for nothing". On a
 cyclic schedule this evaluator disagrees with `ConcurrentRunner` on roughly
 10% of the fuzz corpus, always about *who is on the cycle*, and the threaded
-runner is the one that matches S9. Two causes, both structural:
+runner is the one that is right: everyone on the cycle publishes -1, and
+nobody else does. Two causes, both structural:
 
 * It settles the cycle its recursion walked into -- the frames between the
   re-entered Innie and the current one -- where the threaded runner settles
@@ -60,7 +61,7 @@ class _Reentry(Exception):
     """Control flow, not a failure -- which is why it is here and not in
     `errors.py`. Raised when resolving a branch would re-enter an Innie below
     the probe that started it, and caught by that probe, which then reports
-    the branch as deferrable (S8b).
+    the branch as deferrable.
     """
 
     def __init__(self, innie_id: str) -> None:
@@ -84,7 +85,7 @@ class LazyEvaluator:
 
     def __init__(self, innies: list[Innie]) -> None:
         self._programs: dict[str, Program] = {innie.id: innie.program for innie in innies}
-        # Pre-populated from the full Innie list (S11) and doubling as the memo
+        # Pre-populated from the full Innie list and doubling as the memo
         # table: a settled Cell is a cached result, so each Innie runs once.
         self._registry = Registry(innie.id for innie in innies)
         self._on_stack: list[str] = []
@@ -124,7 +125,7 @@ class LazyEvaluator:
         except _Reentry:
             raise  # a deferral signal in flight -- not this Innie's failure
         except BaseException as error:  # deliberate catch-all, as in the runner
-            # S10: the fault becomes this Innie's work product. Guarded because
+            # The fault becomes this Innie's work product. Guarded because
             # a cycle may already have settled this Cell to -1 underneath us.
             if cell.peek() is None:
                 cell.fault(error)
@@ -134,9 +135,9 @@ class LazyEvaluator:
 
         if cell.peek() is None:  # not already settled as a cycle member
             if outcome.staged is None:
-                cell.commit_void()  # S2: a workday with no WAFFLE publishes VOID
+                cell.commit_void()  # a workday with no WAFFLE publishes VOID
             else:
-                cell.commit(outcome.staged)  # S1: the last staged value
+                cell.commit(outcome.staged)  # the last staged value
         return self._settled(cell.peek(), innie_id)
 
     # -- cycles ----------------------------------------------------------
@@ -149,11 +150,11 @@ class LazyEvaluator:
         if self._barriers and position < self._barriers[-1]:
             # The loop passes below the innermost probe, so the fold that
             # started that probe might still escape through another branch.
-            # Unwind and let it try (S8b).
+            # Unwind and let it try.
             raise _Reentry(innie_id)
 
         # No probe can help: everything from here up is on the cycle, and only
-        # cycle members publish -1 (S9). Their dependents read it as data.
+        # cycle members publish -1. Their dependents read it as data.
         for member in self._on_stack[position:]:
             member_cell = self._registry.cell(member)
             if member_cell.peek() is None:
@@ -180,7 +181,7 @@ class LazyEvaluator:
 @register
 class SerialRunner(Runner):
     """The Runner contract, met without a single thread: every Cell settled on
-    return, and results that depend only on the input (S8)."""
+    return, and results that depend only on the input."""
 
     name = "serial"
 

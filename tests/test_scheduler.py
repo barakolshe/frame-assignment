@@ -8,8 +8,9 @@ one it deliberately does not:
 * **One Outie thread per Innie, not a pool.** Asserted structurally by counting
   the threads the runner constructs, never by timing.
 
-Not proved here: deadlock resolution. Nothing in this module contains a cycle;
-that is Task 12's job and it must not change a single number below.
+Not proved here: deadlock resolution. Nothing in this module contains a cycle,
+and detection must not change a single number below. `test_deadlock.py` covers
+that half.
 """
 
 from __future__ import annotations
@@ -63,7 +64,7 @@ def test_a_dependent_innie_waits_and_reads() -> None:
 
 
 def test_multiple_waffles_publish_only_the_last() -> None:
-    """S1, and the reason 2.json exists.
+    """WAFFLE stages, the runner publishes -- and the reason 2.json exists.
 
     BURT reads DYLAN twice and must see 100 both times: WAFFLE stages, the
     runner publishes once, and a published value is immutable. Under an eager
@@ -100,13 +101,13 @@ def test_deep_chain_of_dependencies() -> None:
 
 
 def test_an_innie_with_no_waffle_is_void_not_pending() -> None:
-    """S2. VOID is a settled Cell, which is the whole point -- a pending one
+    """VOID is a settled Cell, which is the whole point -- a pending one
     would hang every dependent."""
     assert results({"innies": [{"id": "A", "schedule": "LOAD 5"}]})["A"].is_void
 
 
 def test_reading_a_void_innie_faults_the_reader() -> None:
-    """S2: A settled fine, it just has no work product. So B does not get a
+    """Innie A settled fine, it just has no work product. So B does not get a
     `DependencyFaulted` -- A did not fault -- it gets the `NoWorkProduct` that
     reading a VOID Innie raises. B's *own* fault is then an ordinary
     dependency fault for C, chained back to the cause."""
@@ -131,7 +132,7 @@ def test_reading_a_void_innie_faults_the_reader() -> None:
 
 
 def test_faults_propagate_down_a_chain_with_chained_causes() -> None:
-    """S10: a fault is not a deadlock. It travels, chained, and every Cell on
+    """A fault is not a deadlock. It travels, chained, and every Cell on
     the way still settles."""
     res = results(
         {
