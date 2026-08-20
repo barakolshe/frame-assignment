@@ -2,7 +2,7 @@
 
 The second of the three abstractions in this design, and it earns its keep:
 there are genuinely two execution strategies -- threads (`concurrent.py`) and
-the single-threaded reference oracle (`serial.py`, Task 14) -- and the CLI has
+the single-threaded reference oracle (`serial.py`) -- and the CLI has
 to pick between them without knowing either (DIP).
 
 `RUNNERS` is the OCP extension point. A third strategy is a dict entry and
@@ -30,9 +30,9 @@ class Runner(ABC):
         determinism test checks one against the other:
 
         * every Cell is settled on return -- none left pending, whatever
-          happened (S2, S9, S10);
+          happened -- VOID, deadlock and fault all count as settled;
         * the results depend only on `innies`. Two runners may wait very
-          differently and must still agree on every value (S8).
+          differently and must still agree on every value.
         """
 
 

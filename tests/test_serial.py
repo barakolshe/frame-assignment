@@ -2,14 +2,15 @@
 
 Every assertion here is structural -- a published value -- never a timing
 measurement. The runner has one thread, so "did it short-circuit?" can only be
-answered by what the registry ends up holding, which is exactly the property
-S8 cares about.
+answered by what the registry ends up holding -- which is exactly the property
+that matters: short-circuiting may change how long you wait, never what you
+compute.
 
-The interesting tests are the S8(b) ones. A branch that would re-enter an
-Innie already under evaluation is *deferred*, not resolved, so that a healthy
-branch gets its chance first. Without that, this oracle publishes -1 where the
-concurrent run completes normally, and the determinism check (Task 16) fails
-pointing at the oracle rather than at a real bug.
+The interesting tests are the branch-deferral ones. A branch that would
+re-enter an Innie already under evaluation is *deferred*, not resolved, so that
+a healthy branch gets its chance first. Without that, this oracle publishes -1
+where the concurrent run completes normally, and a serial-vs-concurrent
+comparison fails pointing at the oracle rather than at a real bug.
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ def test_serial_is_registered_under_its_mode_name() -> None:
     assert RUNNERS["serial"] is SerialRunner
 
 
-# ------------------------------------------------------------ cycles (S9)
+# ------------------------------------------------------------------ cycles
 
 
 def test_serial_detects_a_two_cycle() -> None:
@@ -65,7 +66,7 @@ def test_serial_detects_a_two_cycle() -> None:
 
 
 def test_serial_detects_a_self_reference() -> None:
-    # S9: a cycle of length 1, not a parse error.
+    # A self-reference is a cycle of length 1, not a parse error.
     assert values(schedule(("A", "LOAD 5\nADD A\nWAFFLE"))) == {"A": -1}
 
 
@@ -80,13 +81,13 @@ def test_deadlock_resolves_outward_only_cycle_members_publish_minus_one() -> Non
     ) == {"A": -1, "B": -1, "C": 9}
 
 
-# --------------------------------------------------- S8(b): branch deferral
+# -------------------------------------------------------- branch deferral
 
 
 def test_serial_defers_a_cyclic_branch_and_escapes_via_a_healthy_one() -> None:
-    # PLAN.md S8(b), verbatim. Without deferral this returns
-    # {"HELLY": -1, "MARK": -1} while the concurrent run returns
-    # {"HELLY": 0, "MARK": 0} -- the exact mismatch Task 16 would report.
+    # MARK cycles back to HELLY; DYLAN does not. Without deferral this
+    # returns {"HELLY": -1, "MARK": -1} while the concurrent run returns
+    # {"HELLY": 0, "MARK": 0} -- one schedule, two answers.
     assert values(
         schedule(
             ("DYLAN", "LOAD 1\nWAFFLE"),
@@ -126,7 +127,8 @@ def test_serial_still_reports_a_cycle_when_no_branch_escapes() -> None:
 def test_a_cycle_inside_a_probed_branch_settles_without_swallowing_the_asker() -> None:
     """P <-> Q is a cycle in its own right, reached only *through* a branch
     HELLY is trying. It must settle to -1 where it is found -- HELLY and MARK
-    are not on it, so HELLY still publishes a real value (S9, outward)."""
+    are not on it, so HELLY still publishes a real value: deadlock resolves
+    outward."""
     assert values(
         schedule(
             ("HELLY", "LOAD 100\nWELLNESS_CHECK 5 > ANY OF [MARK]\nWAFFLE"),
@@ -168,7 +170,7 @@ def test_nested_folds_with_no_escape_anywhere_settle_the_whole_cycle() -> None:
     ) == {"ME": -1, "X": -1, "P": -1, "R": 1000, "D": 1000}
 
 
-# --------------------------------------------- settlement contract (S2, S10)
+# ------------------------------------------------ the settlement contract
 
 
 def test_a_workday_without_a_waffle_publishes_void() -> None:
@@ -192,8 +194,8 @@ def test_a_fault_settles_into_the_cell_and_propagates_to_dependents() -> None:
 
 
 def test_every_cell_is_settled_on_return() -> None:
-    """The Runner contract: no Innie is ever left pending, whatever happened
-    (S2, S9, S10). A cycle, a fault and a VOID in one schedule."""
+    """The Runner contract: no Innie is ever left pending, whatever happened.
+    A cycle, a fault and a VOID in one schedule."""
     registry = run_serial(
         schedule(
             ("A", "LOAD 0\nADD B\nWAFFLE"),
@@ -224,8 +226,8 @@ def test_serial_result_is_independent_of_innie_declaration_order() -> None:
 
 
 def test_a_deferred_branch_gives_the_same_answer_from_either_end() -> None:
-    """The S8(b) schedule declared in reverse. Deferral must not depend on the
-    order run() happens to walk the Innies in."""
+    """The deferral schedule declared in reverse. Deferral must not depend on
+    the order run() happens to walk the Innies in."""
     assert values(
         schedule(
             ("MARK", "LOAD 0\nADD HELLY\nWAFFLE"),

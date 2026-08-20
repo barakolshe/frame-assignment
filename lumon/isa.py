@@ -66,7 +66,7 @@ class Ref(_Node):
 
 class RefList(_Node):
     # Deliberately unconstrained: `ADD []` is a *parse* error, but an empty
-    # list is legal here -- S7's vacuous quantifiers (ANY OF [] is false,
+    # list is legal here -- the vacuous quantifiers (ANY OF [] is false,
     # ALL OF [] is true) are evaluated over exactly this node.
     innie_ids: tuple[str, ...]
 
@@ -181,8 +181,9 @@ Program = tuple[AnyInstruction, ...]
 
 def all_refs(program: Program) -> tuple[str, ...]:
     """Every Innie ID mentioned anywhere in a program, including inside
-    shifts and conditions. Used only for load-time validation (S11) --
-    never for dependency ordering, which is dynamic (S6)."""
+    shifts and conditions. Used only for load-time validation -- never for
+    dependency ordering, which is dynamic: `CONDITIONAL_ADD` resolves its list
+    only when its condition holds."""
     out: tuple[str, ...] = ()
     for instr in program:
         out += instr.refs()

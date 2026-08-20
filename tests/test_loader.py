@@ -62,7 +62,7 @@ def test_unknown_reference_inside_a_condition_is_caught() -> None:
 
 
 def test_self_reference_is_accepted_at_load_time() -> None:
-    # S9: a self-reference is a one-node cycle resolved to -1 at runtime,
+    # A self-reference is a one-node cycle resolved to -1 at runtime,
     # NOT a load-time error.
     innies = load({"innies": [{"id": "A", "schedule": "LOAD 5\nADD A\nWAFFLE"}]})
     assert len(innies) == 1

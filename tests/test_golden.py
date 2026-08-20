@@ -1,7 +1,7 @@
 """Acceptance: the three sample schedules against hand-computed values.
 
-`EXPECTED` is derived by hand in PLAN.md's "Golden Values" section, from the
-spec -- not from a recorded run of this implementation. When a number here
+Every number in `EXPECTED` was computed by hand from the spec -- never
+recorded from a run of this implementation. When a number here
 disagrees with the code, re-derive it by hand first: the hand computation is
 the authority, and "the test must be wrong" is the failure mode this file
 exists to prevent.
@@ -25,8 +25,8 @@ EXPECTED: dict[str, dict[str, int]] = {
     # HELLY 10 +5 +5; MARK 2+3; IRVING 0+20+5;
     # BURT 25 > ALL OF [20, 5] -> reset.
     "1.json": {"HELLY": 20, "MARK": 5, "IRVING": 25, "BURT": 0},
-    # S1: DYLAN stages 1 then 100 and publishes 100, so BURT's two reads
-    # both see 100 -> 100 then 200.
+    # DYLAN stages 1 then 100 and publishes only the last, so BURT's two
+    # reads both see 100 -> 100 then 200.
     "2.json": {"DYLAN": 100, "BURT": 200},
     # HELLY 1*2*2*2; MARK 0+8+8; IRVING 100 (8 > ANY OF [16] is false, no
     # reset) + 8 + 16 since 16 > 10; BURT 1 +124 four times;
@@ -47,8 +47,8 @@ def test_sample_matches_hand_computed_values(name: str) -> None:
 
 @pytest.mark.parametrize("name", sorted(EXPECTED))
 def test_sample_is_stable_across_repeated_runs(name: str) -> None:
-    """Determinism is a hard requirement, not a tendency (S8). Thread
-    interleaving changes run to run; the answer must not."""
+    """Determinism is a hard requirement, not a tendency. Thread interleaving
+    changes run to run; the answer must not."""
     expected = EXPECTED[name]
     for _ in range(50):
         assert values(name) == expected

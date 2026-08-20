@@ -47,7 +47,7 @@ def test_commit_then_get_returns_the_value() -> None:
 
 
 def test_commit_void_then_get_raises_no_work_product() -> None:
-    """S2: an Innie with zero WAFFLEs is settled, and reading it faults."""
+    """An Innie with zero WAFFLEs is settled (VOID), and reading it faults."""
     reg = make_registry("A")
     reg.cell("A").commit_void()
     with pytest.raises(NoWorkProduct) as exc:
@@ -56,7 +56,7 @@ def test_commit_void_then_get_raises_no_work_product() -> None:
 
 
 def test_fault_then_get_raises_chained() -> None:
-    """S10: the traceback has to say why the dependency failed."""
+    """The traceback has to say why the dependency failed."""
     reg = make_registry("A")
     cause = ValueError("boom")
     reg.cell("A").fault(cause)
@@ -102,7 +102,7 @@ def test_is_settled_and_peek_track_the_settle() -> None:
 
 
 def test_deadlock_value_is_ordinary_data_not_an_error() -> None:
-    """S9: a dependent reading a deadlocked Innie gets the integer -1 and
+    """A dependent reading a deadlocked Innie gets the integer -1 and
     computes with it. Deadlock is a value, not a fault."""
     assert DEADLOCK_VALUE == -1
     reg = make_registry("A")
@@ -155,7 +155,7 @@ def test_unwrap_of_a_faulted_result_chains_the_cause() -> None:
 
 
 def test_registry_is_prepopulated_so_unknown_ids_fail_fast() -> None:
-    """S11: an unknown reference is a KeyError, never a hang."""
+    """An unknown reference is a KeyError, never a hang."""
     reg = make_registry("A")
     with pytest.raises(KeyError):
         reg.cell("GHOST")

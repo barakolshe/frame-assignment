@@ -61,7 +61,7 @@ def handles[InstrT: Instruction](
 
 
 def operand_values(operand: Operand, resolver: Resolver) -> list[int]:
-    """S3: an operand contributes one value (Const/Ref) or many (RefList)."""
+    """An operand contributes one value (Const/Ref) or many (RefList)."""
     if isinstance(operand, Const):
         return [operand.value]
     if isinstance(operand, Ref):
@@ -76,7 +76,7 @@ def comparand_value(comparand: Comparand, resolver: Resolver) -> int:
 
 
 def evaluate(condition: Condition, resolver: Resolver) -> bool:
-    """S7 + S8. Short-circuit lives in the resolver, never here.
+    """Short-circuit lives in the resolver, never here.
 
     The LHS always resolves -- an unconditional wait when it is a `Ref`. The
     quantified forms hand a predicate to the resolver, which is free to stop
@@ -125,24 +125,25 @@ def _modulo(instr: Modulo, state: State, resolver: Resolver) -> None:
     for divisor in operand_values(instr.operand, resolver):
         if divisor == 0:
             raise ArithmeticFault(f"line {instr.line}: MODULO by zero")
-        state.acc %= divisor  # S4: Python semantics -- the sign follows the divisor
+        state.acc %= divisor  # Python semantics -- the sign follows the divisor
 
 
 @handles(Waffle)
 def _waffle(instr: Waffle, state: State, resolver: Resolver) -> None:
-    state.staged = state.acc  # S1: stage, do not publish
+    # Stage rather than publish: a reader must never see a partial work product.
+    state.staged = state.acc
 
 
 @handles(WellnessCheck)
 def _wellness_check(instr: WellnessCheck, state: State, resolver: Resolver) -> None:
-    # S5: the bare form resets unconditionally; the conditional form asks first.
+    # The bare form resets unconditionally; the conditional form asks first.
     if instr.condition is None or evaluate(instr.condition, resolver):
         state.acc = 0
 
 
 @handles(ConditionalAdd)
 def _conditional_add(instr: ConditionalAdd, state: State, resolver: Resolver) -> None:
-    # S6: evaluate the condition FIRST; if false, never resolve the list. This
+    # Evaluate the condition FIRST; if false, never resolve the list. This
     # is what makes the dependency graph dynamic rather than statically known.
     if evaluate(instr.condition, resolver):
         state.acc += sum(resolver.values(instr.targets.innie_ids))
@@ -152,5 +153,5 @@ def _conditional_add(instr: ConditionalAdd, state: State, resolver: Resolver) ->
 def _shift(instr: Shift, state: State, resolver: Resolver) -> None:
     from lumon.interp.engine import run_block  # local import breaks a cycle
 
-    for _ in range(instr.times):  # S12; `times >= 0` is enforced by the model
+    for _ in range(instr.times):  # `times >= 0` is enforced by the model
         run_block(instr.body, state, resolver)

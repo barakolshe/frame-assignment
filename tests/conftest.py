@@ -19,11 +19,11 @@ class DictResolver(Resolver):
 
     * **Strict left-to-right short-circuit.** `any_of` stops at the first
       true, `all_of` at the first false. That is the reference behaviour the
-      concurrent resolver must agree with (S8) -- it may stop waiting sooner,
-      but it may never return a different answer.
+      concurrent resolver must agree with: it may stop waiting sooner, but
+      it may never return a different answer.
     * **A call log.** `touched` records which Innies were actually consulted,
       so a test can prove *structurally* that a false `CONDITIONAL_ADD` never
-      resolved its list (S6). No sleeps, no elapsed-time assertions.
+      resolved its list. No sleeps, no elapsed-time assertions.
     """
 
     def __init__(self, values: dict[str, int]) -> None:

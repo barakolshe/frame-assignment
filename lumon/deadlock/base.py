@@ -25,7 +25,7 @@ class DeadlockDetector(ABC):
 
         Contract: the result depends only on `graph` -- never on which thread
         called this, nor on the order nodes were inserted or visited. That is
-        what makes deadlock resolution deterministic (S9), and it is why the
+        what makes deadlock resolution deterministic, and it is why the
         answer is a strongly-connected component rather than whichever path a
         search happened to walk.
         """

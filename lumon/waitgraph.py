@@ -3,7 +3,7 @@
 Distinct from the static reference graph and much smaller -- an entry exists
 only while an Innie is actually blocked. That distinction is load-bearing:
 `CONDITIONAL_ADD [X] IF <cond>` creates an edge only when the condition is true
-at runtime (S6), so a graph built by scanning source over-approximates and
+at runtime, so a graph built by scanning source over-approximates and
 would hand -1 to Innies that finish perfectly well.
 
 Deliberately a plain mutable class with no lock of its own: the Registry owns
