@@ -22,7 +22,7 @@ class AndOrDetector(DeadlockDetector):
     1. **Stuck set, by greatest fixpoint.** Assume every blocked Innie is
        stuck, then repeatedly release any that still has a way forward. The
        fixpoint is unique and independent of iteration order, so it is
-       deterministic -- the property S9 rests on.
+       deterministic -- the same schedule always hands -1 to the same Innies.
     2. **Cycles within the stuck set.** Restrict the graph to stuck-to-stuck
        edges and take the SCC. Only those get -1; the rest of the stuck set is
        waiting *on* a cycle and is rescued when the cycle publishes.

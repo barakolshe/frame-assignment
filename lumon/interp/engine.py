@@ -2,7 +2,7 @@
 
 Faults raised here -- `ArithmeticFault`, or anything a resolver raises while
 waiting -- propagate straight out of `execute`. Settling them into a Cell is
-the runner's job (S10); the interpreter has no opinion on failure handling.
+the runner's job; the interpreter has no opinion on failure handling.
 """
 
 from pydantic import BaseModel, ConfigDict
@@ -16,7 +16,7 @@ from lumon.resolvers.base import Resolver
 class Outcome(BaseModel):
     """What an Innie publishes at the end of its workday.
 
-    `staged is None` means the Innie never WAFFLEd, i.e. VOID (S2).
+    `staged is None` means the Innie never WAFFLEd, i.e. VOID.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -42,7 +42,7 @@ def run_block(program: Program, state: State, resolver: Resolver) -> None:
     """Execute a sequence of instructions against shared state.
 
     Used for both the top-level program and a `Shift` body, which is why
-    nesting costs nothing (S12).
+    nesting costs nothing.
     """
     for instr in program:
         step(instr, state, resolver)

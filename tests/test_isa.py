@@ -71,7 +71,7 @@ def test_condition_refs_include_lhs_and_quantified_list() -> None:
 
 
 def test_a_quantified_condition_may_hold_an_empty_ref_list() -> None:
-    """S7's vacuous quantifiers -- ANY OF [] is false, ALL OF [] is true --
+    """The vacuous quantifiers -- ANY OF [] is false, ALL OF [] is true --
     are evaluated later, but the node has to be constructible now."""
     cond = Condition(
         lhs=Const(value=1),
@@ -146,7 +146,7 @@ def test_deeply_nested_shifts_keep_their_types() -> None:
 
 def test_all_refs_walks_shifts_and_conditions_in_order() -> None:
     """Order is preserved because the loader reports the *first* unknown
-    reference it finds (S11), so `all_refs` returns a tuple, not a set."""
+    reference it finds, so `all_refs` returns a tuple, not a set."""
     program: Program = (
         Load(operand=Ref(innie_id="HELLY"), line=1),
         Add(operand=RefList(innie_ids=("MARK", "IRVING")), line=2),

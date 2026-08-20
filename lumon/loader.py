@@ -58,7 +58,7 @@ def _walk(program: Program) -> Iterator[AnyInstruction]:
 
 
 def _validate_refs(innie: Innie, known: set[str]) -> None:
-    """S11: every referenced ID must exist. Line numbers survive nesting
+    """Every referenced ID must exist. Line numbers survive nesting
     because each Instruction carries its own `line`."""
     for instr in _walk(innie.program):
         if isinstance(instr, Shift):

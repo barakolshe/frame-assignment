@@ -4,7 +4,7 @@ The algorithm itself is proved in `test_waitgraph.py`, against hand-built
 graphs and without a single thread. What this module proves is the other half:
 that the wait edges actually get registered as Innies block, that detection
 fires from inside the Registry's critical section, and that every cycle member
-ends up holding -1 rather than hanging (S9).
+ends up holding -1 rather than hanging.
 
 Deadlock is a *value*, never an error: an Innie that merely depends on a cycle
 reads -1 as ordinary data and finishes normally.
@@ -56,7 +56,8 @@ def test_three_node_cycle_all_get_minus_one() -> None:
 
 
 def test_self_reference_is_a_one_node_cycle() -> None:
-    """S9 -- a legal input with a defined answer, NOT a parse error."""
+    """A self-reference is a legal input with a defined answer -- a cycle of
+    length 1, resolved to -1, NOT a parse error."""
     assert values(sched(("A", "LOAD 5\nADD A\nWAFFLE"))) == {"A": -1}
 
 
@@ -117,7 +118,7 @@ def test_cycle_plus_healthy_subgraph_leaves_the_healthy_part_alone() -> None:
 
 
 def test_a_deadlocked_run_produces_no_faults() -> None:
-    """Deadlock is a value, not an error (S9/S10). It doubles as the guard on
+    """Deadlock is a value, not an error. It doubles as the guard on
     cancellation: a cancelled Innie that woke up and committed anyway would
     trip `DoubleSettle`, which would surface here as a faulted cell."""
     settled = results(
@@ -137,7 +138,7 @@ def test_a_deadlocked_run_produces_no_faults() -> None:
 def test_conditional_edge_that_never_fires_forms_no_cycle() -> None:
     """THE test that proves detection runs on the runtime graph. A statically
     references B and B references A, but A's edge is guarded by a condition
-    that is false (S6), so no cycle forms and both complete normally."""
+    that is false, so no cycle forms and both complete normally."""
     assert values(
         sched(
             ("GATE", "LOAD 0\nWAFFLE"),
@@ -243,12 +244,12 @@ def test_all_of_short_circuits_on_a_false_branch_and_escapes() -> None:
     ) == {"FALSIFIER": 999, "HELLY": 7, "LATE": 7}
 
 
-# ---------------------------------------- S8: an absorbing value beats a fault
+# ------------------------------------------ an absorbing value beats a fault
 
 
 def test_an_absorbing_branch_wins_over_a_faulting_one_whatever_settles_first() -> None:
-    """S8(a). VOID_X faults any reader (S2) and GOOD satisfies the predicate.
-    `true` is absorbing, so the fold is `true` no matter which branch settles
+    """VOID_X publishes no work product, so reading it faults; GOOD satisfies
+    the predicate. `true` is absorbing, so the fold is `true` however it settles
     first -- if the fault were raised on arrival instead, the answer would
     depend on thread timing, and P would be 9 on some runs and 0 on others.
     Repeated because that is exactly the kind of bug one run can hide.
@@ -276,7 +277,7 @@ def test_a_false_branch_absorbs_all_of_ahead_of_a_faulting_one() -> None:
 
 def test_a_deferred_fault_still_faults_the_reader_when_nothing_absorbs_it() -> None:
     """Deferred, not discarded: with no absorbing value anywhere in the fold,
-    the fault is the answer and P faults (S10) rather than quietly reading
+    the fault is the answer and P faults rather than quietly reading
     `ANY OF` as false."""
     settled = results(
         sched(

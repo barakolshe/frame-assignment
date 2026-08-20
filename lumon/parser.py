@@ -1,5 +1,6 @@
 """Schedule text -> Program. All validation that can happen without the
-full Innie list happens here, with line numbers (S11 handles the rest)."""
+full Innie list happens here, with line numbers. Checking that a reference
+names a real Innie needs that list, so it is the loader's job."""
 
 from __future__ import annotations
 
@@ -33,7 +34,7 @@ _INT_RE = re.compile(r"^-?\d+$")
 
 
 def parse_operand(token: str, line: int) -> Operand:
-    """Const | Ref | RefList (S3).
+    """Const | Ref | RefList.
 
     An empty `[]` is rejected in every position. The spec only ever lists
     non-empty groups of Innies, so `ADD []` -- and `ANY OF []` -- is a typo,
@@ -143,7 +144,7 @@ def _parse_comparand(token: str, line: int) -> Comparand:
 
 
 def parse_condition(text: str, line: int) -> Condition:
-    """`<comparand> OP <comparand> | ANY OF [...] | ALL OF [...]`  (S7)."""
+    """The condition grammar: `<comparand> OP <comparand> | ANY OF [...] | ALL OF [...]`."""
     text = text.strip()
     for symbol in _OPERATORS:
         idx = text.find(symbol)
@@ -220,7 +221,7 @@ def _parse_block(
 
     `opened_at` is the line of the SHIFT that opened this block, or None at
     the top level. Returns (program, next_position). Recursion makes nesting
-    free and there are no jump targets to get wrong (S12).
+    free and there are no jump targets to get wrong.
     """
     out: list[AnyInstruction] = []
     while pos < len(lines):

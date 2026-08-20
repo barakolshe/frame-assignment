@@ -2,7 +2,8 @@
 
 Programs are built from ISA nodes rather than parsed from text: `lumon.parser`
 is a sibling task, and the interpreter's contract is with `lumon.isa`, not with
-the parser. Text -> value coverage arrives with the golden tests (Task 11).
+the parser. Coverage from schedule text through to a value lives in
+`test_golden.py`.
 """
 
 import ast
@@ -142,13 +143,13 @@ def test_load_add_multiply() -> None:
 
 
 def test_accumulator_starts_at_zero() -> None:
-    """S13: a program that never LOADs begins at 0."""
+    """A program that never LOADs begins at 0."""
     program: Program = (Add(operand=Const(value=7), line=1), Waffle(line=2))
     assert run(program) == Outcome(staged=7)
 
 
 def test_modulo_uses_python_semantics() -> None:
-    """S4: `%` follows the sign of the divisor. C would give -1 here."""
+    """`%` follows the sign of the divisor. C would give -1 here."""
     program: Program = (
         Load(operand=Const(value=-7), line=1),
         Modulo(operand=Const(value=3), line=2),
@@ -158,7 +159,7 @@ def test_modulo_uses_python_semantics() -> None:
 
 
 def test_modulo_zero_faults() -> None:
-    """S4/S10: a fault, not a deadlock, and not -1."""
+    """MODULO 0 is a fault, not a deadlock, and not -1."""
     program: Program = (
         Load(operand=Const(value=5), line=1),
         Modulo(operand=Const(value=0), line=2),
@@ -169,7 +170,7 @@ def test_modulo_zero_faults() -> None:
 
 
 def test_last_waffle_wins() -> None:
-    """S1 / 2.json DYLAN: WAFFLE stages, it does not publish."""
+    """2.json DYLAN: WAFFLE stages, it does not publish."""
     program: Program = (
         Load(operand=Const(value=1), line=1),
         Waffle(line=2),
@@ -180,7 +181,7 @@ def test_last_waffle_wins() -> None:
 
 
 def test_no_waffle_yields_void() -> None:
-    """S2: legal, and it must settle rather than hang."""
+    """Zero WAFFLEs is legal, and it must settle (VOID) rather than hang."""
     assert run((Load(operand=Const(value=42), line=1),)) == Outcome(staged=None)
 
 
@@ -189,12 +190,13 @@ def test_an_empty_program_is_void() -> None:
 
 
 def test_waffle_with_no_preceding_load_stages_zero() -> None:
-    """S13, the other half: the staging slot picks up the initial 0."""
+    """The other half of starting at 0: the staging slot picks it up, so a
+    bare WAFFLE stages 0."""
     assert run((Waffle(line=1),)) == Outcome(staged=0)
 
 
 def test_bare_wellness_check_resets_to_zero() -> None:
-    """S5: the unconditional form."""
+    """The bare form resets the accumulator unconditionally."""
     program: Program = (
         Load(operand=Const(value=99), line=1),
         WellnessCheck(condition=None, line=2),
@@ -214,7 +216,7 @@ def test_shift_repeats_the_body() -> None:
 
 
 def test_shift_zero_times_skips_the_body() -> None:
-    """S12: legal, and the body never executes."""
+    """SHIFT 0 TIMES is legal, and the body never executes."""
     program: Program = (
         Load(operand=Const(value=5), line=1),
         Shift(times=0, body=(Add(operand=Const(value=100), line=3),), line=2),
@@ -237,7 +239,7 @@ def test_nested_shifts() -> None:
 
 
 def test_waffle_inside_a_shift_stages_each_iteration_last_wins() -> None:
-    """3.json HELLY: stages 2, 4, 8 -- only 8 survives (S1)."""
+    """3.json HELLY: stages 2, 4, 8 -- only the last, 8, survives."""
     program: Program = (
         Load(operand=Const(value=1), line=1),
         Shift(
@@ -263,7 +265,7 @@ def test_add_bare_ref() -> None:
 
 
 def test_add_ref_list_sums_all() -> None:
-    """S3 / 1.json IRVING: 0 + 20 + 5."""
+    """1.json IRVING: a ref list contributes every value -- 0 + 20 + 5."""
     program: Program = (
         Load(operand=Const(value=0), line=1),
         Add(operand=RefList(innie_ids=("HELLY", "MARK")), line=2),
@@ -274,7 +276,7 @@ def test_add_ref_list_sums_all() -> None:
 
 
 def test_multiply_ref_list_takes_the_product() -> None:
-    """S3: 2 * 3 * 4."""
+    """A ref list under MULTIPLY takes the product: 2 * 3 * 4."""
     program: Program = (
         Load(operand=Const(value=2), line=1),
         Multiply(operand=RefList(innie_ids=("A", "B")), line=2),
@@ -301,7 +303,7 @@ def test_ref_list_is_resolved_in_source_order() -> None:
 
 
 def test_repeated_reads_of_one_innie_agree() -> None:
-    """S1 / 3.json MARK: published values are immutable, so both reads see 8."""
+    """3.json MARK: published values are immutable, so both reads see 8."""
     program: Program = (
         Load(operand=Const(value=0), line=1),
         Shift(times=2, body=(Add(operand=Ref(innie_id="HELLY"), line=3),), line=2),
@@ -390,7 +392,7 @@ def test_conditional_add_when_true() -> None:
 
 
 def test_conditional_add_when_false_never_touches_the_list() -> None:
-    """S6, the load-bearing assertion for dynamic dependencies.
+    """The load-bearing assertion for dynamic dependencies.
 
     GHOSTLY has no value at all: if the interpreter resolved the list before
     checking the condition, this would raise instead of returning 100.
@@ -410,7 +412,7 @@ def test_conditional_add_when_false_never_touches_the_list() -> None:
 
 
 def test_any_of_short_circuits_and_never_reads_later_entries() -> None:
-    """S8: true is absorbing, so UNREADABLE cannot change the answer."""
+    """`true` is absorbing, so UNREADABLE cannot change the answer."""
     resolver = DictResolver({"X": 100, "A": 1})
     condition = gt(Ref(innie_id="X"), Quantifier.ANY, RefList(innie_ids=("A", "UNREADABLE")))
     assert evaluate(condition, resolver) is True
@@ -418,7 +420,7 @@ def test_any_of_short_circuits_and_never_reads_later_entries() -> None:
 
 
 def test_all_of_short_circuits_on_first_false() -> None:
-    """S8: false is absorbing."""
+    """`false` is absorbing, so UNREADABLE cannot change the answer."""
     resolver = DictResolver({"X": 1, "A": 100})
     condition = gt(Ref(innie_id="X"), Quantifier.ALL, RefList(innie_ids=("A", "UNREADABLE")))
     assert evaluate(condition, resolver) is False
@@ -426,7 +428,7 @@ def test_all_of_short_circuits_on_first_false() -> None:
 
 
 def test_vacuous_quantifiers() -> None:
-    """S7: ANY OF [] is false, ALL OF [] is true -- the classic off-by-one."""
+    """ANY OF [] is false, ALL OF [] is true -- the classic off-by-one."""
     resolver = DictResolver({})
     empty = RefList(innie_ids=())
     assert evaluate(gt(Const(value=1), Quantifier.ANY, empty), resolver) is False
@@ -435,7 +437,7 @@ def test_vacuous_quantifiers() -> None:
 
 
 def test_a_quantified_condition_resolves_its_lhs_unconditionally() -> None:
-    """S7: the LHS always resolves, even when the list is empty."""
+    """The LHS always resolves, even when the list is empty."""
     resolver = DictResolver({"X": 1})
     condition = gt(Ref(innie_id="X"), Quantifier.ANY, RefList(innie_ids=()))
     assert evaluate(condition, resolver) is False

@@ -25,7 +25,7 @@ from lumon.deadlock.base import DeadlockDetector
 from lumon.errors import Cancelled, DependencyFaulted, DoubleSettle, NoWorkProduct
 from lumon.waitgraph import WaitGraph
 
-# What every Innie on a circular dependency publishes (S9). An ordinary value:
+# What every Innie on a circular dependency publishes. An ordinary value:
 # a dependent reads -1 and computes with it. Deadlock is not a fault.
 DEADLOCK_VALUE = -1
 
@@ -46,14 +46,15 @@ class PendingAtSnapshot(RuntimeError):
 class Result(BaseModel):
     """One Innie's settled work product.
 
-        value is an int, error is None  -> published (S1)
-        value is None, error is None    -> VOID, finished without a WAFFLE (S2)
-        error is not None               -> fault (S10)
+        value is an int, error is None  -> published: the last WAFFLE's value
+        value is None, error is None    -> VOID, finished without a WAFFLE
+        error is not None               -> fault
 
     Frozen, so a settled Cell cannot be mutated through the reference a reader
-    is holding -- the immutability S1 depends on, enforced by the type rather
-    than by convention. No field defaults: VOID is stated at the construction
-    site, never inferred from an omission.
+    is holding: two reads of one Innie inside a single workday always agree,
+    and that is enforced by the type rather than by convention. No field
+    defaults: VOID is stated at the construction site, never inferred from an
+    omission.
     """
 
     # arbitrary_types_allowed: pydantic has no schema for BaseException, so it
@@ -75,7 +76,8 @@ class Result(BaseModel):
 
 
 def unwrap(result: Result) -> int:
-    """Result -> int, or the exception a reader of it deserves (S2, S10)."""
+    """Result -> int, or the exception a reader of it deserves: VOID raises,
+    a fault re-raises chained to its cause."""
     if result.error is not None:
         raise DependencyFaulted(result.innie_id) from result.error
     if result.value is None:
@@ -147,7 +149,7 @@ class Cell:
 
 
 class Registry:
-    """One Cell per Innie, pre-populated at construction (S11) so an unknown
+    """One Cell per Innie, pre-populated from the full Innie list so an unknown
     reference is a KeyError, never a hang.
 
     Single responsibility: own the Cells and the Condition they share, and be
@@ -225,7 +227,7 @@ class Registry:
     def await_any(self, me: str, targets: Sequence[str]) -> str:
         """Block until at least one target settles, and return its id.
 
-        The OR half of the protocol (S8): `ANY OF` / `ALL OF` proceed as soon
+        The OR half of the protocol: `ANY OF` / `ALL OF` proceed as soon
         as one branch lands, so this registers an OR-*group* rather than a set
         of AND-edges. The distinction is what stops the detector from calling
         an Innie deadlocked while it still has a live branch to escape
@@ -317,8 +319,8 @@ class Registry:
         inside the component depends on how far its thread happened to get.
         The SCC of a graph is deterministic, but the graph you snapshot at an
         arbitrary instant is not, and the two answers differ in exactly the
-        way S9 forbids -- the same schedule assigning -1 to different Innies on
-        different runs.
+        way determinism forbids -- the same schedule assigning -1 to different
+        Innies on different runs.
 
         Waiting for quiescence removes the choice. Every Innie that could
         still register an edge has done so, so the graph is a function of the
@@ -345,7 +347,7 @@ class Registry:
             resolved = True
 
     def _resolve_cycle(self, members: list[str]) -> None:
-        """Commit -1 to every cycle member (S9). Caller holds self.cond.
+        """Commit -1 to every cycle member. Caller holds self.cond.
 
         This is the one place a Cell is written by a thread other than its
         own -- the members are asleep. They learn about it on waking, via
