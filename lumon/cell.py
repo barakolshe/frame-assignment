@@ -16,13 +16,13 @@ lock state, and they are only ever constructed internally. Result IS a model
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 from pydantic import BaseModel, ConfigDict
 
+from lumon.deadlock.andor import AndOrDetector
 from lumon.deadlock.base import DeadlockDetector
-from lumon.deadlock.scc import SccDetector
-from lumon.errors import DependencyFaulted, DoubleSettle, NoWorkProduct
+from lumon.errors import Cancelled, DependencyFaulted, DoubleSettle, NoWorkProduct
 from lumon.waitgraph import WaitGraph
 
 # What every Innie on a circular dependency publishes (S9). An ordinary value:
@@ -169,7 +169,7 @@ class Registry:
         }
         self._graph = WaitGraph()
         self._cancelled: set[str] = set()
-        self._detector: DeadlockDetector = detector or SccDetector()
+        self._detector: DeadlockDetector = detector or AndOrDetector()
 
     def cell(self, innie_id: str) -> Cell:
         try:
@@ -185,7 +185,7 @@ class Registry:
     # -- blocking protocol ------------------------------------------------
 
     def await_innies(self, me: str, targets: set[str]) -> None:
-        """Block until every target has settled, detecting cycles first.
+        """Block until every target has settled -- the AND-wait.
 
         Every point where an Innie blocks on *all* of a set of Innies comes
         through here: ADD/MULTIPLY/MODULO over a list, a bare Ref,
@@ -198,6 +198,11 @@ class Registry:
         `wait()` releases it atomically, registration -> detection -> blocking
         is one uninterrupted critical section.
 
+        Detection is retried on every wake, not just on entry: the last thing
+        that happens before a schedule goes quiet may be a Cell settling rather
+        than an edge being registered, and it is the threads it wakes that have
+        to notice (see `_detect_if_quiescent_locked`).
+
         Returning does not mean the targets settled: a cancelled Innie returns
         early, and the caller is expected to ask `is_cancelled` before reading
         anything.
@@ -209,13 +214,42 @@ class Registry:
 
             self._graph.wait_on(me, pending)
             try:
-                self._detect_locked()
-                while not self.all_settled_locked(targets):
-                    if me in self._cancelled:
+                while True:
+                    self._detect_if_quiescent_locked()
+                    if me in self._cancelled or self.all_settled_locked(targets):
                         return
                     self.cond.wait()
             finally:
                 self._graph.clear(me)
+
+    def await_any(self, me: str, targets: Sequence[str]) -> str:
+        """Block until at least one target settles, and return its id.
+
+        The OR half of the protocol (S8): `ANY OF` / `ALL OF` proceed as soon
+        as one branch lands, so this registers an OR-*group* rather than a set
+        of AND-edges. The distinction is what stops the detector from calling
+        an Innie deadlocked while it still has a live branch to escape
+        through -- and the group stays registered for exactly as long as this
+        thread sleeps, which is when the detector needs to see it.
+
+        Targets are scanned in the caller's order, so when several have
+        already settled the choice does not depend on wake-up timing.
+        """
+        with self.cond:
+            while True:
+                for target in targets:
+                    if self._cells[target].is_settled_locked():
+                        return target
+                if me in self._cancelled:
+                    raise Cancelled(me)
+
+                self._graph.push_or_group(me, targets)
+                try:
+                    if self._detect_if_quiescent_locked():
+                        continue  # a cycle just resolved: a target may hold -1
+                    self.cond.wait()
+                finally:
+                    self._graph.pop_or_group(me)
 
     def is_cancelled(self, innie_id: str) -> bool:
         """True once this Innie has been resolved as a cycle member. Its Cell
@@ -233,17 +267,82 @@ class Registry:
 
     # -- detection --------------------------------------------------------
 
-    def _detect_locked(self) -> None:
-        """Run the detector and resolve whatever it finds. Caller holds
+    def _wait_satisfied_locked(self, innie_id: str) -> bool:
+        """True when a registered wait's condition already holds -- the thread
+        has been notified and simply has not re-acquired the lock yet. Caller
+        holds self.cond.
+
+        `Condition.wait()` re-acquires before returning, so between the
+        `notify_all` and the wake-up a runnable Innie is still sitting in the
+        graph. Counting it as blocked would let detection fire on a schedule
+        that is about to move, and *when* the snapshot happens to be taken
+        would decide who lands in the cycle.
+        """
+        and_edges = self._graph.and_edges(innie_id)
+        if and_edges and all(self._cells[t].is_settled_locked() for t in and_edges):
+            return True
+        return any(
+            any(self._cells[t].is_settled_locked() for t in group)
+            for group in self._graph.or_groups(innie_id)
+        )
+
+    def _quiescent_locked(self) -> bool:
+        """True when nothing in the schedule can move: every Innie is either
+        settled or waiting on something that has not arrived. Caller holds
         self.cond.
 
-        Called at every point an Innie registers a wait edge, which is exactly
-        when a cycle can complete: whoever adds the final edge sees the whole
-        cycle and resolves it.
+        An Innie whose thread is still computing counts as neither, which is
+        the point -- it may be about to register the very edge that decides
+        who is in the cycle.
         """
-        cycle = self._detector.find_cycle(self._graph)
-        if cycle:
+        blocked = self._graph.blocked()
+        if not blocked:
+            return False
+        for innie_id, cell in self._cells.items():
+            if cell.is_settled_locked():
+                continue
+            if innie_id not in blocked:
+                return False  # still computing: its edges are not in yet
+            if self._wait_satisfied_locked(innie_id):
+                return False  # already notified: about to run again
+        return True
+
+    def _detect_if_quiescent_locked(self) -> bool:
+        """Detect and resolve every cycle, but only once nothing can move.
+        Says whether anything was resolved. Caller holds self.cond.
+
+        **Why the quiescence gate.** Running detection the moment an edge is
+        registered means running it against a *partial* graph: an Innie still
+        computing has not yet declared what it waits on, so whether it lands
+        inside the component depends on how far its thread happened to get.
+        The SCC of a graph is deterministic, but the graph you snapshot at an
+        arbitrary instant is not, and the two answers differ in exactly the
+        way S9 forbids -- the same schedule assigning -1 to different Innies on
+        different runs.
+
+        Waiting for quiescence removes the choice. Every Innie that could
+        still register an edge has done so, so the graph is a function of the
+        schedule and the values already published, and so is the component
+        derived from it. Nothing is lost by waiting: at quiescence, by
+        definition, no Innie was going to make progress anyway.
+
+        All cycles are resolved, not just the first. Disjoint cycles reach
+        quiescence together, and the woken threads re-check rather than
+        register, so leaving one unresolved would leave nobody to find it.
+        A cycle whose members can escape through what an earlier iteration
+        published is not reported: resolution clears those members out of the
+        graph, and the detector reads an OR-group with a settled member as a
+        live way forward.
+        """
+        if not self._quiescent_locked():
+            return False
+        resolved = False
+        while True:
+            cycle = self._detector.find_cycle(self._graph)
+            if not cycle:
+                return resolved
             self._resolve_cycle(cycle)
+            resolved = True
 
     def _resolve_cycle(self, members: list[str]) -> None:
         """Commit -1 to every cycle member (S9). Caller holds self.cond.

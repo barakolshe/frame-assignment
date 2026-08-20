@@ -13,6 +13,7 @@ reads -1 as ordinary data and finishes normally.
 from __future__ import annotations
 
 from lumon.cell import Result
+from lumon.errors import NoWorkProduct
 from lumon.loader import load
 from lumon.runners.concurrent import run_concurrent
 
@@ -159,6 +160,36 @@ def test_conditional_edge_that_does_fire_forms_a_cycle() -> None:
 # --------------------------------------------------------------- determinism
 
 
+def test_a_late_arriving_edge_still_joins_the_component() -> None:
+    """Detection must read the *whole* wait-for graph, not the part of it that
+    happened to exist first.
+
+    A and B are circular on their own and block almost immediately. LATE
+    closes a bigger loop -- B waits on it, it waits on B -- but only after a
+    12-link chain resolves, so it registers its edge long after A and B are
+    asleep. Detecting the moment an edge lands would resolve the two-node
+    component, leave LATE to read -1 and finish with 0, and produce a
+    different answer on any run where LATE got there in time. Detection waits
+    until nothing can move, so all three are one component on every run.
+
+    This is asserted by value and by repetition, never by timing: the chain
+    length only decides how likely the bad interleaving is, not what the
+    correct answer is.
+    """
+    chain: list[tuple[str, str]] = [("C0", "LOAD 1\nWAFFLE")]
+    chain += [(f"C{i}", f"LOAD 0\nADD C{i - 1}\nWAFFLE") for i in range(1, 12)]
+    schedule = sched(
+        *chain,
+        ("A", "LOAD 0\nADD B\nWAFFLE"),
+        ("B", "LOAD 0\nADD [A, LATE]\nWAFFLE"),
+        ("LATE", "LOAD 0\nADD C11\nADD B\nWAFFLE"),
+    )
+    for _ in range(50):
+        settled = values(schedule)
+        assert (settled["A"], settled["B"], settled["LATE"]) == (-1, -1, -1)
+        assert settled["C11"] == 1
+
+
 def test_deadlocked_schedule_is_identical_across_500_runs() -> None:
     schedule = sched(
         ("A", "LOAD 0\nADD B\nWAFFLE"),
@@ -171,3 +202,88 @@ def test_deadlocked_schedule_is_identical_across_500_runs() -> None:
     for _ in range(500):
         assert values(schedule) == first
     assert first == {"A": -1, "B": -1, "C": -1, "D": 49, "E": 1}
+
+
+# ------------------------------------------------------------------ OR-waits
+
+
+def test_or_branch_escapes_a_cycle_no_false_deadlock() -> None:
+    """HELLY's ANY OF has two branches. MARK cycles back to HELLY; DYLAN does
+    not. HELLY must escape via DYLAN and complete normally -- an AND-only wait
+    graph calls HELLY and MARK a cycle here, which is deterministic and
+    wrong."""
+    assert values(
+        sched(
+            ("DYLAN", "LOAD 1\nWAFFLE"),
+            ("HELLY", "LOAD 100\nWELLNESS_CHECK 5 > ANY OF [MARK, DYLAN]\nWAFFLE"),
+            ("MARK", "LOAD 0\nADD HELLY\nWAFFLE"),
+        )
+    ) == {"DYLAN": 1, "HELLY": 0, "MARK": 0}
+
+
+def test_or_branch_with_no_escape_is_still_a_cycle() -> None:
+    """MARK is HELLY's only branch, and MARK waits on HELLY. Genuine cycle."""
+    assert values(
+        sched(
+            ("HELLY", "LOAD 100\nWELLNESS_CHECK 5 > ANY OF [MARK]\nWAFFLE"),
+            ("MARK", "LOAD 0\nADD HELLY\nWAFFLE"),
+        )
+    ) == {"HELLY": -1, "MARK": -1}
+
+
+def test_all_of_short_circuits_on_a_false_branch_and_escapes() -> None:
+    """5 > FALSIFIER is false, so ALL OF is false without ever needing LATE --
+    which cycles back. HELLY escapes."""
+    assert values(
+        sched(
+            ("FALSIFIER", "LOAD 999\nWAFFLE"),
+            ("HELLY", "LOAD 7\nWELLNESS_CHECK 5 > ALL OF [FALSIFIER, LATE]\nWAFFLE"),
+            ("LATE", "LOAD 0\nADD HELLY\nWAFFLE"),
+        )
+    ) == {"FALSIFIER": 999, "HELLY": 7, "LATE": 7}
+
+
+# ---------------------------------------- S8: an absorbing value beats a fault
+
+
+def test_an_absorbing_branch_wins_over_a_faulting_one_whatever_settles_first() -> None:
+    """S8(a). VOID_X faults any reader (S2) and GOOD satisfies the predicate.
+    `true` is absorbing, so the fold is `true` no matter which branch settles
+    first -- if the fault were raised on arrival instead, the answer would
+    depend on thread timing, and P would be 9 on some runs and 0 on others.
+    Repeated because that is exactly the kind of bug one run can hide.
+    """
+    schedule = sched(
+        ("VOID_X", "LOAD 5"),  # no WAFFLE: VOID, and reading it raises
+        ("GOOD", "LOAD 1\nWAFFLE"),
+        ("P", "LOAD 9\nWELLNESS_CHECK 5 > ANY OF [VOID_X, GOOD]\nWAFFLE"),
+    )
+    for _ in range(50):
+        assert values(schedule) == {"VOID_X": None, "GOOD": 1, "P": 0}
+
+
+def test_a_false_branch_absorbs_all_of_ahead_of_a_faulting_one() -> None:
+    """The same rule for the AND-fold: `false` is absorbing, so FALSIFIER
+    decides the answer and VOID_X's fault never surfaces."""
+    assert values(
+        sched(
+            ("VOID_X", "LOAD 5"),
+            ("FALSIFIER", "LOAD 999\nWAFFLE"),
+            ("P", "LOAD 9\nWELLNESS_CHECK 5 > ALL OF [VOID_X, FALSIFIER]\nWAFFLE"),
+        )
+    ) == {"VOID_X": None, "FALSIFIER": 999, "P": 9}
+
+
+def test_a_deferred_fault_still_faults_the_reader_when_nothing_absorbs_it() -> None:
+    """Deferred, not discarded: with no absorbing value anywhere in the fold,
+    the fault is the answer and P faults (S10) rather than quietly reading
+    `ANY OF` as false."""
+    settled = results(
+        sched(
+            ("VOID_X", "LOAD 5"),
+            ("P", "LOAD 9\nWELLNESS_CHECK 5 > ANY OF [VOID_X]\nWAFFLE"),
+        )
+    )
+    fault = settled["P"].error
+    assert isinstance(fault, NoWorkProduct)
+    assert fault.innie_id == "VOID_X"
