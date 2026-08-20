@@ -205,6 +205,36 @@ def test_one_thread_per_innie_not_a_pool(monkeypatch: pytest.MonkeyPatch) -> Non
     assert all(thread.daemon for thread in constructed), "a hung run must not wedge the suite"
 
 
+def test_any_of_does_not_serialize_on_a_slow_branch() -> None:
+    """SLOW hangs off a 20-link chain; FAST is immediate. `ANY OF` must be
+    satisfiable by FAST without the whole chain resolving first.
+
+    Asserted by result, not by timing: a sequential `any_of` would also pass
+    this, so it is deliberately paired with
+    `test_deadlock.py::test_or_branch_escapes_a_cycle_no_false_deadlock`, which
+    can only pass with a genuine OR-wait.
+    """
+    chain: list[dict[str, str]] = [{"id": "C0", "schedule": "LOAD 1\nWAFFLE"}]
+    chain += [
+        {"id": f"C{i}", "schedule": f"LOAD 0\nADD C{i - 1}\nWAFFLE"} for i in range(1, 20)
+    ]
+    assert (
+        values(
+            {
+                "innies": chain
+                + [
+                    {"id": "FAST", "schedule": "LOAD 1\nWAFFLE"},
+                    {
+                        "id": "P",
+                        "schedule": "LOAD 9\nWELLNESS_CHECK 5 > ANY OF [FAST, C19]\nWAFFLE",
+                    },
+                ]
+            }
+        )["P"]
+        == 0
+    )
+
+
 def test_runners_registry_exposes_the_concurrent_runner() -> None:
     """RUNNERS is the OCP extension point the CLI derives --mode from: a third
     strategy is a dict entry, never an edit to the CLI."""
