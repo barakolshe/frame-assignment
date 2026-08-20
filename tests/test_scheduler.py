@@ -20,10 +20,11 @@ from typing import Any
 
 import pytest
 
-from lumon.cell import Result
-from lumon.errors import DependencyFaulted, NoWorkProduct
-from lumon.loader import load
+from lumon.cell import Registry, Result
+from lumon.errors import DependencyFaulted, NoWorkProduct, WatchdogTimeout
+from lumon.loader import Innie, load
 from lumon.runners import RUNNERS, ConcurrentRunner, run_concurrent
+from lumon.runners.concurrent import WATCHDOG_SECONDS
 
 Schedule = dict[str, list[dict[str, str]]]
 
@@ -241,3 +242,42 @@ def test_runners_registry_exposes_the_concurrent_runner() -> None:
     strategy is a dict entry, never an edit to the CLI."""
     assert ConcurrentRunner.name == "concurrent"
     assert RUNNERS["concurrent"] is ConcurrentRunner
+
+
+# ---------------------------------------------------------------- the watchdog
+
+
+def test_the_watchdog_turns_a_hung_run_into_a_diagnosis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A wedged run must fail loudly, naming the threads and the Cells.
+
+    The hang is forced by an Event this test never sets, so the Outie provably
+    never returns -- no sleep, and no assertion on how long anything took. The
+    deadline only decides how soon the diagnosis arrives.
+
+    Note what the watchdog does NOT do: settle the stragglers to -1. That would
+    turn every future hang into a plausible-looking answer. It is a bug
+    detector, and in a correct implementation it never fires at all.
+    """
+    wedged = threading.Event()
+
+    def never_returns(innie: Innie, registry: Registry) -> None:
+        wedged.wait()
+
+    monkeypatch.setattr("lumon.runners.concurrent.run_innie", never_returns)
+    innies = load({"innies": [{"id": "A", "schedule": "LOAD 1\nWAFFLE"}]})
+    try:
+        with pytest.raises(WatchdogTimeout) as exc:
+            ConcurrentRunner(timeout=0.05).run(innies)
+    finally:
+        wedged.set()  # release the daemon thread rather than leaking it
+
+    assert "outie-A" in str(exc.value), "the message must name the stuck thread"
+    assert "cells still pending: ['A']" in str(exc.value)
+
+
+def test_the_watchdog_has_a_deadline_when_the_cli_constructs_a_runner() -> None:
+    """`RUNNERS[mode]()` takes no arguments, so the default is what every real
+    run gets. Asserted structurally -- nothing here waits for it."""
+    assert ConcurrentRunner().timeout == WATCHDOG_SECONDS
